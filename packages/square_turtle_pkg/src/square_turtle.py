@@ -16,19 +16,19 @@ def move_turtle_square():
     cmd_vel_msg = Twist()
 
     while not rospy.is_shutdown():
-        # Move forward for some time
-        cmd_vel_msg.linear.x = 2.0  # Linear velocity
-        cmd_vel_msg.angular.z = 0.0  # No angular velocity (straight)
-        velocity_publisher.publish(cmd_vel_msg)  # Publish the forward command
-        rospy.sleep(2)  # Adjust this time based on how far the turtle should move
+        for _ in range(4):  # Loop to draw 4 sides of a square
+            # Move forward for some time
+            cmd_vel_msg.linear.x = 2.0  # Linear velocity
+            cmd_vel_msg.angular.z = 0.0  # No angular velocity (straight)
+            velocity_publisher.publish(cmd_vel_msg)  # Publish the forward command
+            rospy.sleep(2)  # Adjust this time based on how far the turtle should move
 
-        # Turn 90 degrees
-        cmd_vel_msg.linear.x = 0.0  # Stop moving forward
-        cmd_vel_msg.angular.z = 1.57  # Set angular velocity to 90 degrees per second (1.57 radians per second)
-        velocity_publisher.publish(cmd_vel_msg)  # Publish the turn command
-        rospy.sleep(1.5)  # Time to turn 90 degrees (adjust based on angular speed)
-        
-        
+            # Turn 90 degrees
+            cmd_vel_msg.linear.x = 0.0  # Stop moving forward
+            cmd_vel_msg.angular.z = 1.57  # Set angular velocity to 90 degrees per second (1.57 radians per second)
+            velocity_publisher.publish(cmd_vel_msg)  # Publish the turn command
+            rospy.sleep(1.5)  # Time to turn 90 degrees (adjust based on angular speed)
+
             # Stop the turtle after completing each movement cycle
             cmd_vel_msg.linear.x = 0.0
             cmd_vel_msg.angular.z = 0.0
