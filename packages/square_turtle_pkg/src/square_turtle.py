@@ -27,6 +27,13 @@ def move_turtle_square():
         cmd_vel_msg.angular.z = 1.57  # Set angular velocity to 90 degrees per second (1.57 radians per second)
         velocity_publisher.publish(cmd_vel_msg)  # Publish the turn command
         rospy.sleep(1.5)  # Time to turn 90 degrees (adjust based on angular speed)
+        
+        
+            # Stop the turtle after completing each movement cycle
+            cmd_vel_msg.linear.x = 0.0
+            cmd_vel_msg.angular.z = 0.0
+            velocity_publisher.publish(cmd_vel_msg)  # Stop moving
+            rospy.sleep(0.5)  # Pause before starting the next side
 
 if __name__ == '__main__':
     try:
