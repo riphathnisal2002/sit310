@@ -13,8 +13,8 @@ class Drive_Square:
         rospy.init_node('drive_square_node', anonymous=True)
         
         #Initialize Pub/Subs
-        self.pub = rospy.Publisher('/akandb/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
-        rospy.Subscriber('/akandb/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
+        self.pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
         
     # robot only moves when lane following is selected on the duckiebot joystick app
     def fsm_callback(self, msg):
@@ -39,24 +39,27 @@ class Drive_Square:
     # Robot drives in a square and then stops
     def move_robot(self):
 
-        #YOUR CODE GOES HERE#
-        self.cmd_msg.header.stamp = rospy.Time.now()
-        self.cmd_msg.v = 0.5 # striaght line velocity
-        self.cmd_msg.omega = 0.0
-        self.pub.publish(self.cmd_msg)
-        rospy.loginfo("Forward!")
-        rospy.sleep(1) # straight line driving time
-        
-        self.cmd_msg.header.stamp = rospy.Time.now()
-        self.cmd_msg.v = -0.5 # striaght line velocity
-        self.cmd_msg.omega = 0.0
-        self.pub.publish(self.cmd_msg)
-        rospy.loginfo("Backward!")
-        rospy.sleep(1) # straight line driving time
-        
-        ######################
-                
+       # Move in a square: 4 sides and 4 turns
+        for i in range(4):
+            # Move forward 1 meter
+            self.cmd_msg.header.stamp = rospy.Time.now()
+            self.cmd_msg.v = 0.5  # linear velocity (m/s)
+            self.cmd_msg.omega = 0.0  # no angular velocity
+            self.pub.publish(self.cmd_msg)
+            rospy.loginfo(f"Moving forward - Side {i+1}")
+            rospy.sleep(2)  # Move forward for 2 seconds to cover 1 meter
+
+            # Rotate 90 degrees
+            self.cmd_msg.header.stamp = rospy.Time.now()
+            self.cmd_msg.v = 0.0
+            self.cmd_msg.omega = 1.0  # angular velocity (rad/s)
+            self.pub.publish(self.cmd_msg)
+            rospy.loginfo("Turning 90 degrees")
+            rospy.sleep(1.57)  # Rotate 90 degrees (π/2 radians)
+
+        # Stop after completing the square
         self.stop_robot()
+        rospy.loginfo("Finished square path and stopped.")
 
 if __name__ == '__main__':
     try:
