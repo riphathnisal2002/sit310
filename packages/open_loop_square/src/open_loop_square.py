@@ -43,19 +43,26 @@ class Drive_Square:
         for i in range(4):
             # Move forward 1 meter
             self.cmd_msg.header.stamp = rospy.Time.now()
-            self.cmd_msg.v = 0.5  # linear velocity (m/s)
+            self.cmd_msg.v = 5.5  # linear velocity (m/s)
             self.cmd_msg.omega = 0.0  # no angular velocity
             self.pub.publish(self.cmd_msg)
             rospy.loginfo(f"Moving forward - Side {i+1}")
             rospy.sleep(2)  # Move forward for 2 seconds to cover 1 meter
+            
+            # Stop movement
+            self.stop_robot()
+            rospy.sleep(0.2)
 
             # Rotate 90 degrees
             self.cmd_msg.header.stamp = rospy.Time.now()
-            self.cmd_msg.v = 0.0
-            self.cmd_msg.omega = 1.0  # angular velocity (rad/s)
+            self.cmd_msg.v = 0.3
+            self.cmd_msg.omega = 8.3  # angular velocity (rad/s)
             self.pub.publish(self.cmd_msg)
             rospy.loginfo("Turning 90 degrees")
             rospy.sleep(1.57)  # Rotate 90 degrees (π/2 radians)
+            
+            self.stop_robot()
+            rospy.sleep(0.5)
 
         # Stop after completing the square
         self.stop_robot()
