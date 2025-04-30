@@ -13,9 +13,9 @@ class ClosedLoopSquare:
         rospy.loginfo("Node initialized")
         
         # Initialize publishers/subscribers
-        self.pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
-        rospy.Subscriber('/birdie/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
-        rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
+        self.pub = rospy.Publisher('/jeff/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        rospy.Subscriber('/jeff/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
+        rospy.Subscriber('/jeff/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
         
         # Set the parameters
         self.ticks_per_meter = 345
@@ -34,7 +34,17 @@ class ClosedLoopSquare:
         self.tasks = []
         self.current_task = None
         self.is_running = False
-        self.test_mode = "square"  # Default to make a square
+
+        # Task queue to make a square
+        for i in range(4):
+            self.tasks.append({
+                'action': 'move',
+                'ticks': self.ticks_per_meter
+            })
+            self.tasks.append({
+                'action': 'turn',
+                'ticks': self.ticks_per_90_deg
+            })
 
         # Initialize timer
         timer_period = 0.01
@@ -46,32 +56,23 @@ class ClosedLoopSquare:
             self.is_running = False
             self.stop_robot()
         elif msg.state == "LANE_FOLLOWING":            
-            rospy.loginfo(f"Starting {self.test_mode} pattern")
-            # Reset the task queue and state when entering LANE_FOLLOWING
+            rospy.loginfo("Starting square pattern")
+            # Always reset the task queue and state when entering LANE_FOLLOWING
             self.is_running = True
             self.current_task = None
             self.break_start = None
             
-            # Reset task queue based on test mode
+            # Reset task queue
             self.tasks = []
-            if self.test_mode == "square":
-                for i in range(4):
-                    self.tasks.append({'action': 'move', 'ticks': self.ticks_per_meter})
-                    self.tasks.append({'action': 'turn', 'ticks': self.ticks_per_90_deg})
-            elif self.test_mode == "move_test":
-                # Test forward and backward movement at different speeds
-                speeds = [0.3, 0.5]
-                for speed in speeds:
-                    self.linear_speed = speed
-                    self.tasks.append({'action': 'move', 'ticks': self.ticks_per_meter, 'direction': 1})
-                    self.tasks.append({'action': 'move', 'ticks': self.ticks_per_meter, 'direction': -1})
-            elif self.test_mode == "turn_test":
-                # Test clockwise and counter-clockwise turns at different speeds
-                speeds = [0.3, 0.5]
-                for speed in speeds:
-                    self.angular_speed = speed
-                    self.tasks.append({'action': 'turn', 'ticks': self.ticks_per_90_deg, 'direction': 1})
-                    self.tasks.append({'action': 'turn', 'ticks': self.ticks_per_90_deg, 'direction': -1})
+            for i in range(4):
+                self.tasks.append({
+                    'action': 'move',
+                    'ticks': self.ticks_per_meter
+                })
+                self.tasks.append({
+                    'action': 'turn',
+                    'ticks': self.ticks_per_90_deg
+                })
  
     def stop_robot(self):
         self.cmd_msg.header.stamp = rospy.Time.now()
@@ -87,14 +88,14 @@ class ClosedLoopSquare:
         current_ticks = self.right_ticks - start
         remaining_ticks = ticks - current_ticks
         
-        # Check if we've reached target
+        # Check if we've reached target (in either direction)
         if abs(current_ticks) >= abs(ticks):
             rospy.loginfo("Move complete")
             self.stop_robot()
             return True
         
         # Move in appropriate direction
-        direction = self.current_task.get('direction', 1 if remaining_ticks > 0 else -1)
+        direction = 1 if remaining_ticks > 0 else -1
         self.cmd_msg.header.stamp = rospy.Time.now()
         self.cmd_msg.v = self.linear_speed * direction
         self.cmd_msg.omega = 0.0
@@ -106,14 +107,14 @@ class ClosedLoopSquare:
         current_ticks = self.right_ticks - start
         remaining_ticks = ticks - current_ticks
         
-        # Check if we've reached target angle
+        # Check if we've reached target angle (in either direction)
         if abs(current_ticks) >= abs(ticks):
             rospy.loginfo("Turn complete")
             self.stop_robot()
             return True
         
         # Turn in appropriate direction
-        direction = self.current_task.get('direction', 1 if remaining_ticks > 0 else -1)
+        direction = 1 if remaining_ticks > 0 else -1
         self.cmd_msg.header.stamp = rospy.Time.now()
         self.cmd_msg.v = 0.0
         self.cmd_msg.omega = self.angular_speed * direction
@@ -127,7 +128,7 @@ class ClosedLoopSquare:
         # Handle breaks between tasks
         if self.break_start is not None:
             if (rospy.Time.now() - self.break_start) < self.break_time:
-                return
+                return  # Still in break, do nothing
             self.break_start = None  # Break is over
         
         # Start new task if needed
@@ -156,12 +157,55 @@ class ClosedLoopSquare:
             if self.tasks:  # More tasks remaining
                 self.break_start = rospy.Time.now()
 
+    def move_custom_distance(self, distance_meters, speed):
+        """
+        Moves the robot a given distance at a specified speed.
+        Handles both forward (positive) and backward (negative) motion.
+        """
+        rospy.loginfo(f"Starting custom move: {distance_meters} meters at {speed} m/s")
+
+        # Calculate how many encoder ticks are needed for the distance
+        target_ticks = int(distance_meters * self.ticks_per_meter)
+        start_ticks = self.right_ticks
+        rate = rospy.Rate(100)  # 100 Hz loop
+
+        while not rospy.is_shutdown():
+            current_ticks = self.right_ticks - start_ticks
+            if abs(current_ticks) >= abs(target_ticks):
+                rospy.loginfo("Custom move complete.")
+                break
+
+            direction = 1 if target_ticks - current_ticks > 0 else -1
+            self.cmd_msg.header.stamp = rospy.Time.now()
+            self.cmd_msg.v = abs(speed) * direction
+            self.cmd_msg.omega = 0.0
+            self.pub.publish(self.cmd_msg)
+            rate.sleep()
+
+        self.stop_robot()
+
+
     def run(self):
         rospy.spin()  # keeps node from exiting until node has shutdown
 
 if __name__ == '__main__':
     try:
         closed_loop_square = ClosedLoopSquare()
+        rospy.sleep(2.0)  # Allow ROS to initialize
+
+        # Forward and back at 0.3 m/s
+        closed_loop_square.move_custom_distance(1.0, 0.3)
+        rospy.sleep(1.0)
+        closed_loop_square.move_custom_distance(-1.0, 0.3)
+
+        rospy.sleep(2.0)
+
+        # Forward and back at 0.6 m/s
+        closed_loop_square.move_custom_distance(1.0, 0.6)
+        rospy.sleep(1.0)
+        closed_loop_square.move_custom_distance(-1.0, 0.6)
+
+        # Keep node alive
         closed_loop_square.run()
     except rospy.ROSInterruptException:
         pass
