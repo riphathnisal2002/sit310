@@ -3,13 +3,14 @@
 import rospy
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Int32
+from sensor_msgs.msg import Joy
 import math
 
 class ClosedLoopController:
     def __init__(self):
         rospy.init_node("closed_loop_controller")
 
-        # === Constants (adjust based on your robot)
+        # === Constants (adjust for your robot)
         self.TICKS_PER_REV = 360
         self.WHEEL_RADIUS = 0.03  # meters
         self.WHEEL_BASE = 0.2     # meters
@@ -23,9 +24,11 @@ class ClosedLoopController:
         self.cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
         rospy.Subscriber("/left_encoder", Int32, self.left_encoder_callback)
         rospy.Subscriber("/right_encoder", Int32, self.right_encoder_callback)
+        rospy.Subscriber("/joy", Joy, self.joy_callback)
 
-        rospy.sleep(1)  # wait for ROS connections
+        rospy.sleep(1)  # Wait for everything to initialize
 
+    # === Encoder Callbacks
     def left_encoder_callback(self, msg):
         self.left_encoder = msg.data
 
@@ -60,8 +63,9 @@ class ClosedLoopController:
     def stop(self):
         self.publish_velocity(0, 0)
 
+    # === Movement Functions
     def move_distance(self, distance_m, speed_mps):
-        rospy.loginfo(f"Moving {distance_m} meters at {speed_mps} m/s")
+        rospy.loginfo(f"Moving {distance_m:.2f} m at {speed_mps:.2f} m/s")
         self.reset_encoders()
         direction = 1 if distance_m >= 0 else -1
         self.publish_velocity(speed_mps * direction, 0)
@@ -75,7 +79,7 @@ class ClosedLoopController:
         self.stop()
 
     def rotate_angle(self, angle_rad, angular_speed_rps):
-        rospy.loginfo(f"Rotating {math.degrees(angle_rad)} degrees at {math.degrees(angular_speed_rps)} deg/s")
+        rospy.loginfo(f"Rotating {math.degrees(angle_rad):.1f}° at {math.degrees(angular_speed_rps):.1f}°/s")
         self.reset_encoders()
         direction = 1 if angle_rad >= 0 else -1
         self.publish_velocity(0, angular_speed_rps * direction)
@@ -89,20 +93,35 @@ class ClosedLoopController:
         self.stop()
 
     def draw_square(self, side_length=1.0):
+        rospy.loginfo("Drawing square...")
         for _ in range(4):
             self.move_distance(side_length, 0.2)
             rospy.sleep(0.5)
-            self.rotate_angle(math.pi / 2, math.radians(30))  # 90 degrees
+            self.rotate_angle(math.pi / 2, math.radians(30))
+
+    # === Joystick Callback
+    def joy_callback(self, msg):
+        # Map buttons (adjust if needed)
+        A = msg.buttons[0]
+        B = msg.buttons[1]
+        X = msg.buttons[2]
+        Y = msg.buttons[3]
+        LB = msg.buttons[4]
+
+        if A:
+            self.move_distance(1.0, 0.2)
+        elif B:
+            self.move_distance(-1.0, 0.2)
+        elif X:
+            self.rotate_angle(-math.pi / 2, math.radians(30))
+        elif Y:
+            self.rotate_angle(math.pi / 2, math.radians(30))
+        elif LB:
+            self.draw_square()
 
 if __name__ == "__main__":
-    controller = ClosedLoopController()
-    rospy.sleep(1)
-
-    # === DEMOS ===
-    controller.move_distance(1.0, 0.2)
-    controller.move_distance(-1.0, 0.1)
-
-    controller.rotate_angle(math.pi / 2, math.radians(30))
-    controller.rotate_angle(-math.pi / 2, math.radians(45))
-
-    controller.draw_square()
+    try:
+        ClosedLoopController()
+        rospy.spin()
+    except rospy.ROSInterruptException:
+        pass
