@@ -12,10 +12,15 @@ class ClosedLoopSquare:
         rospy.init_node('closed_loop_square_node', anonymous=True)
         rospy.loginfo("Node initialized")
         
+        self.left_ticks = 0
+
+        
         # Initialize publishers/subscribers
-        self.pub = rospy.Publisher('/jeff/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
-        rospy.Subscriber('/jeff/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
-        rospy.Subscriber('/jeff/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
+        self.pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        rospy.Subscriber('/birdie/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
+        rospy.Subscriber('/birdie/left_wheel_encoder_node/tick', WheelEncoderStamped, self.left_encoder_callback)
+
+        rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
         
         # Set the parameters
         self.ticks_per_meter = 345
@@ -82,6 +87,10 @@ class ClosedLoopSquare:
 
     def encoder_callback(self, msg):
         self.right_ticks = msg.data
+
+    def left_encoder_callback(self, msg):
+        self.left_ticks = msg.data
+
 
     def move_distance(self, ticks, start):
         # Calculate progress and direction
@@ -158,24 +167,33 @@ class ClosedLoopSquare:
                 self.break_start = rospy.Time.now()
 
     def move_custom_distance(self, distance_meters, speed):
-        """
-        Moves the robot a given distance at a specified speed.
-        Handles both forward (positive) and backward (negative) motion.
-        """
+
         rospy.loginfo(f"Starting custom move: {distance_meters} meters at {speed} m/s")
 
-        # Calculate how many encoder ticks are needed for the distance
+        # Convert distance to encoder ticks
         target_ticks = int(distance_meters * self.ticks_per_meter)
-        start_ticks = self.right_ticks
-        rate = rospy.Rate(100)  # 100 Hz loop
+        start_right = self.right_ticks
+        start_left = self.left_ticks
+
+        rate = rospy.Rate(100)  # 100 Hz
+
+        # Optional: stabilize motors with small initial nudge
+        self.cmd_msg.header.stamp = rospy.Time.now()
+        self.cmd_msg.v = max(0.2, abs(speed)) * (1 if distance_meters >= 0 else -1)
+        self.cmd_msg.omega = 0.0
+        self.pub.publish(self.cmd_msg)
+        rospy.sleep(0.1)
 
         while not rospy.is_shutdown():
-            current_ticks = self.right_ticks - start_ticks
-            if abs(current_ticks) >= abs(target_ticks):
+            current_right = self.right_ticks - start_right
+            current_left = self.left_ticks - start_left
+            average_ticks = (current_right + current_left) / 2.0
+
+            if abs(average_ticks) >= abs(target_ticks):
                 rospy.loginfo("Custom move complete.")
                 break
 
-            direction = 1 if target_ticks - current_ticks > 0 else -1
+            direction = 1 if target_ticks - average_ticks > 0 else -1
             self.cmd_msg.header.stamp = rospy.Time.now()
             self.cmd_msg.v = abs(speed) * direction
             self.cmd_msg.omega = 0.0
@@ -185,27 +203,25 @@ class ClosedLoopSquare:
         self.stop_robot()
 
 
+
     def run(self):
         rospy.spin()  # keeps node from exiting until node has shutdown
 
 if __name__ == '__main__':
     try:
         closed_loop_square = ClosedLoopSquare()
-        rospy.sleep(2.0)  # Allow ROS to initialize
-
-        # Forward and back at 0.3 m/s
-        closed_loop_square.move_custom_distance(1.0, 0.3)
-        rospy.sleep(1.0)
-        closed_loop_square.move_custom_distance(-1.0, 0.3)
-
+        
         rospy.sleep(2.0)
 
-        # Forward and back at 0.6 m/s
+        closed_loop_square.move_custom_distance(1.0, 0.3)
+        rospy.sleep(2.0)
+        closed_loop_square.move_custom_distance(-1.0, 0.3)
+        rospy.sleep(2.0)
         closed_loop_square.move_custom_distance(1.0, 0.6)
-        rospy.sleep(1.0)
+        rospy.sleep(2.0)
         closed_loop_square.move_custom_distance(-1.0, 0.6)
 
-        # Keep node alive
+
         closed_loop_square.run()
     except rospy.ROSInterruptException:
         pass
