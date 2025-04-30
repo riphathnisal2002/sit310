@@ -90,45 +90,6 @@ class ClosedLoopSquare:
 
     def left_encoder_callback(self, msg):
         self.left_ticks = msg.data
-
-
-    def move_distance(self, ticks, start):
-        # Calculate progress and direction
-        current_ticks = self.right_ticks - start
-        remaining_ticks = ticks - current_ticks
-        
-        # Check if we've reached target (in either direction)
-        if abs(current_ticks) >= abs(ticks):
-            rospy.loginfo("Move complete")
-            self.stop_robot()
-            return True
-        
-        # Move in appropriate direction
-        direction = 1 if remaining_ticks > 0 else -1
-        self.cmd_msg.header.stamp = rospy.Time.now()
-        self.cmd_msg.v = self.linear_speed * direction
-        self.cmd_msg.omega = 0.0
-        self.pub.publish(self.cmd_msg)
-        return False
-    
-    def turn_90_deg(self, ticks, start):
-        # Calculate progress and direction
-        current_ticks = self.right_ticks - start
-        remaining_ticks = ticks - current_ticks
-        
-        # Check if we've reached target angle (in either direction)
-        if abs(current_ticks) >= abs(ticks):
-            rospy.loginfo("Turn complete")
-            self.stop_robot()
-            return True
-        
-        # Turn in appropriate direction
-        direction = 1 if remaining_ticks > 0 else -1
-        self.cmd_msg.header.stamp = rospy.Time.now()
-        self.cmd_msg.v = 0.0
-        self.cmd_msg.omega = self.angular_speed * direction
-        self.pub.publish(self.cmd_msg)
-        return False
     
     def timer_callback(self, event):
         if not self.is_running:
@@ -202,6 +163,25 @@ class ClosedLoopSquare:
 
         self.stop_robot()
 
+    def rotate_angle(self, angle_degrees, angular_speed):
+
+        rospy.loginfo(f"Starting rotation: {angle_degrees}° at {angular_speed} rad/s")
+
+        angle_radians = math.radians(angle_degrees)
+        direction = 1 if angle_radians > 0 else -1
+        duration = abs(angle_radians) / abs(angular_speed)
+
+        self.cmd_msg.header.stamp = rospy.Time.now()
+        self.cmd_msg.v = 0.0
+        self.cmd_msg.omega = abs(angular_speed) * direction
+        self.pub.publish(self.cmd_msg)
+
+        rospy.sleep(duration)
+
+        self.stop_robot()
+        rospy.loginfo("Rotation complete.")
+
+
 
 
     def run(self):
@@ -209,17 +189,17 @@ class ClosedLoopSquare:
 
 if __name__ == '__main__':
     try:
+
         closed_loop_square = ClosedLoopSquare()
-        
         rospy.sleep(2.0)
 
-        closed_loop_square.move_custom_distance(1.0, 0.3)
+        closed_loop_square.rotate_angle(90, 0.5)
         rospy.sleep(2.0)
-        closed_loop_square.move_custom_distance(-1.0, 0.3)
+        closed_loop_square.rotate_angle(-90, 0.5)
         rospy.sleep(2.0)
-        closed_loop_square.move_custom_distance(1.0, 0.6)
+        closed_loop_square.rotate_angle(90, 1.0)
         rospy.sleep(2.0)
-        closed_loop_square.move_custom_distance(-1.0, 0.6)
+        closed_loop_square.rotate_angle(-90, 1.0)
 
 
         closed_loop_square.run()
