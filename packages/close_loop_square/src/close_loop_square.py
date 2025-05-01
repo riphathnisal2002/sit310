@@ -40,17 +40,6 @@ class ClosedLoopSquare:
         self.current_task = None
         self.is_running = False
 
-        # Task queue to make a square
-        for i in range(4):
-            self.tasks.append({
-                'action': 'move',
-                'ticks': self.ticks_per_meter
-            })
-            self.tasks.append({
-                'action': 'turn',
-                'ticks': self.ticks_per_90_deg
-            })
-
         # Initialize timer
         timer_period = 0.01
         rospy.Timer(rospy.Duration(timer_period), self.timer_callback)
@@ -69,14 +58,18 @@ class ClosedLoopSquare:
             
             # Reset task queue
             self.tasks = []
-            for i in range(4):
+            move_sequence = [
+                (1, 0.3),
+                (-1, 0.3),
+                (1, 0.6),
+                (-1, 0.6),
+            ]
+
+            for direction, distance in move_sequence:
+                ticks = int(direction * self.ticks_per_meter * distance)
                 self.tasks.append({
                     'action': 'move',
-                    'ticks': self.ticks_per_meter
-                })
-                self.tasks.append({
-                    'action': 'turn',
-                    'ticks': self.ticks_per_90_deg
+                    'ticks': ticks
                 })
  
     def stop_robot(self):
@@ -115,10 +108,14 @@ class ClosedLoopSquare:
         # Execute current task
         task_complete = False
         if self.current_task['action'] == 'move':
-            task_complete = self.move_distance(self.current_task['ticks'], self.current_task['start'])
-        elif self.current_task['action'] == 'turn':
-            task_complete = self.turn_90_deg(self.current_task['ticks'], self.current_task['start'])
-        
+            task_complete = self.move_ticks()
+        elif self.current_task['action'] == 'turn_ticks':
+            # Initialize on first run
+            if 'start_left' not in self.current_task or 'start_right' not in self.current_task:
+                self.current_task['start_left'] = self.left_ticks
+                self.current_task['start_right'] = self.right_ticks
+            task_complete = self.turn_ticks()
+
         # Handle task completion
         if task_complete:
             self.current_task = None
@@ -127,81 +124,83 @@ class ClosedLoopSquare:
             if self.tasks:  # More tasks remaining
                 self.break_start = rospy.Time.now()
 
-    def move_custom_distance(self, distance_meters, speed):
 
-        rospy.loginfo(f"Starting custom move: {distance_meters} meters at {speed} m/s")
+    def move_ticks(self):
+        ticks = self.current_task['ticks']
 
-        # Convert distance to encoder ticks
-        target_ticks = int(distance_meters * self.ticks_per_meter)
-        start_right = self.right_ticks
-        start_left = self.left_ticks
+        # Initialize on first run
+        if 'start_right' not in self.current_task or 'start_left' not in self.current_task:
+            self.current_task['start_right'] = self.right_ticks
+            self.current_task['start_left'] = self.left_ticks
 
-        rate = rospy.Rate(100)  # 100 Hz
-
-        # Optional: stabilize motors with small initial nudge
-        self.cmd_msg.header.stamp = rospy.Time.now()
-        self.cmd_msg.v = max(0.2, abs(speed)) * (1 if distance_meters >= 0 else -1)
-        self.cmd_msg.omega = 0.0
-        self.pub.publish(self.cmd_msg)
-        rospy.sleep(0.1)
-
-        while not rospy.is_shutdown():
-            current_right = self.right_ticks - start_right
-            current_left = self.left_ticks - start_left
-            average_ticks = (current_right + current_left) / 2.0
-
-            if abs(average_ticks) >= abs(target_ticks):
-                rospy.loginfo("Custom move complete.")
-                break
-
-            direction = 1 if target_ticks - average_ticks > 0 else -1
+            # Initial motor nudge
             self.cmd_msg.header.stamp = rospy.Time.now()
-            self.cmd_msg.v = abs(speed) * direction
+            self.cmd_msg.v = max(0.2, abs(self.linear_speed)) * (1 if ticks >= 0 else -1)
             self.cmd_msg.omega = 0.0
             self.pub.publish(self.cmd_msg)
-            rate.sleep()
+            return False
 
-        self.stop_robot()
+        # Calculate how far we've moved
+        delta_right = self.right_ticks - self.current_task['start_right']
+        delta_left = self.left_ticks - self.current_task['start_left']
+        average_ticks = (delta_right + delta_left) / 2.0
 
-    def rotate_angle(self, angle_degrees, angular_speed):
+        # Check for completion
+        if abs(average_ticks) >= abs(ticks):
+            rospy.loginfo("Tick-based move complete.")
+            return True
 
-        rospy.loginfo(f"Starting rotation: {angle_degrees}° at {angular_speed} rad/s")
+        # Continue moving
+        direction = 1 if (ticks - average_ticks) > 0 else -1
+        self.cmd_msg.header.stamp = rospy.Time.now()
+        self.cmd_msg.v = abs(self.linear_speed) * direction
+        self.cmd_msg.omega = 0.0
+        self.pub.publish(self.cmd_msg)
+        return False
+    
+    def turn_ticks(self):
+        if not self.current_task or self.current_task['action'] != 'turn_ticks':
+            return False
 
-        angle_radians = math.radians(angle_degrees)
-        direction = 1 if angle_radians > 0 else -1
-        duration = abs(angle_radians) / abs(angular_speed)
+        ticks = self.current_task['ticks']
+        start_left = self.current_task['start_left']
+        start_right = self.current_task['start_right']
+        angular_speed = self.current_task['angular_speed']
 
+        # Calculate how far we’ve turned
+        delta_right = self.right_ticks - start_right
+        delta_left = self.left_ticks - start_left
+        diff_ticks = (delta_right - delta_left) / 2.0
+
+        if abs(diff_ticks) >= abs(ticks):
+            rospy.loginfo("Turn_ticks completed.")
+            return True
+
+        # Continue turning
         self.cmd_msg.header.stamp = rospy.Time.now()
         self.cmd_msg.v = 0.0
-        self.cmd_msg.omega = abs(angular_speed) * direction
+        self.cmd_msg.omega = angular_speed
         self.pub.publish(self.cmd_msg)
+        return False
+    
+    def start_turn_degrees(self, degrees, angular_speed):
 
-        rospy.sleep(duration)
-
-        self.stop_robot()
-        rospy.loginfo("Rotation complete.")
-
-
-
+        tick_sign = 1 if degrees >= 0 else -1
+        ticks = int(abs(degrees) / 90.0 * self.ticks_per_90_deg) * tick_sign
+        self.tasks.append({
+            'action': 'turn_ticks',
+            'ticks': ticks,
+            'angular_speed': angular_speed
+        })
 
     def run(self):
         rospy.spin()  # keeps node from exiting until node has shutdown
 
 if __name__ == '__main__':
     try:
-
         closed_loop_square = ClosedLoopSquare()
-        rospy.sleep(2.0)
-
-        closed_loop_square.rotate_angle(90, 1.0)
-        rospy.sleep(2.0)
-        closed_loop_square.rotate_angle(-90, 1.0)
-        rospy.sleep(2.0)
-        closed_loop_square.rotate_angle(90, 2.0)
-        rospy.sleep(2.0)
-        closed_loop_square.rotate_angle(-90, 2.0)
-
-
+        rospy.sleep(2.0)  # Give system time to initialize
+        closed_loop_square.is_running = True  # Start sequence
         closed_loop_square.run()
     except rospy.ROSInterruptException:
         pass
