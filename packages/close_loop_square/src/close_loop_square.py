@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
-import rospy 
-import math
+import rospy
+import math  # Ensure math module is imported
+
 from duckietown_msgs.msg import WheelEncoderStamped, Twist2DStamped, FSMState
 
 class ClosedLoopSquare:
@@ -15,7 +16,6 @@ class ClosedLoopSquare:
         
         self.left_ticks = 0
 
-        
         # Initialize publishers/subscribers
         self.pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
         rospy.Subscriber('/birdie/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
