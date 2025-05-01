@@ -193,13 +193,13 @@ if __name__ == '__main__':
         closed_loop_square = ClosedLoopSquare()
         rospy.sleep(2.0)
 
-        closed_loop_square.rotate_angle(90, 0.5)
-        rospy.sleep(2.0)
-        closed_loop_square.rotate_angle(-90, 0.5)
-        rospy.sleep(2.0)
         closed_loop_square.rotate_angle(90, 1.0)
         rospy.sleep(2.0)
         closed_loop_square.rotate_angle(-90, 1.0)
+        rospy.sleep(2.0)
+        closed_loop_square.rotate_angle(90, 2.0)
+        rospy.sleep(2.0)
+        closed_loop_square.rotate_angle(-90, 2.0)
 
 
         closed_loop_square.run()
