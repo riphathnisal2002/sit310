@@ -1,127 +1,187 @@
 #!/usr/bin/env python3
-import sys
+
 import rospy
-from duckietown_msgs.msg import Twist2DStamped, FSMState, WheelEncoderStamped
-from sensor_msgs.msg import Range # 1️⃣ Import the Range message
+import math  # Ensure math module is imported
+
+from duckietown_msgs.msg import WheelEncoderStamped, Twist2DStamped, FSMState
 
 class ClosedLoopSquare:
     def __init__(self):
-        self.robot_name = rospy.get_param("~robot_name", "tesla")
-
-        # Encoder state
-        self.right_ticks = 0
-
-        # ToF sensor state
-        self.current_range = float('inf')
-        self.obstacle_detected = False
-        self.tof_threshold = 0.3 # metres: stop if object closer than this
-
-        # Encoder calibration
-        self.ticks_per_meter = 630
-        self.ticks_per_90_degrees = 45
-
-        rospy.init_node("closed_loop_square_node", anonymous=True)
-
-        # Publishers & Subscribers
-        self.pub = rospy.Publisher(
-            f"/{self.robot_name}/car_cmd_switch_node/cmd",
-            Twist2DStamped, queue_size=1
-        )
-        rospy.Subscriber(f"/{self.robot_name}/right_wheel_encoder_node/tick",
-                         WheelEncoderStamped, self.right_encoder_cb, queue_size=1)
-        rospy.Subscriber(f"/{self.robot_name}/fsm_node/mode",
-                         FSMState, self.fsm_cb, queue_size=1)
-        # 2️⃣ Subscribe to the front-center ToF range topic
-        rospy.Subscriber(f"/{self.robot_name}/front_center_tof_driver_node/range",
-                         Range, self.tof_cb, queue_size=1)
-
-        # Reusable cmd
+        # Initialize message
         self.cmd_msg = Twist2DStamped()
 
-    # ───── Callbacks ───────────────────────────────────────────────────────
-    def right_encoder_cb(self, msg):
-        self.right_ticks = msg.data
+        # Initialize ROS node
+        rospy.init_node('closed_loop_square_node', anonymous=True)
+        rospy.loginfo("Node initialized")
+        
+        self.left_ticks = 0
 
-    def fsm_cb(self, msg):
-        if msg.state == "LANE_FOLLOWING":
-            rospy.sleep(1.0)
-            self.draw_square()
+        # Initialize publishers/subscribers
+        self.pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        rospy.Subscriber('/birdie/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
+        rospy.Subscriber('/birdie/left_wheel_encoder_node/tick', WheelEncoderStamped, self.left_encoder_callback)
 
-    # 3️⃣ ToF callback: set flag when range < threshold
-    def tof_cb(self, msg):
-        self.current_range = msg.range
-        self.obstacle_detected = (msg.range < self.tof_threshold)
+        rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
+        
+        # Set the parameters
+        self.ticks_per_meter = 345
+        self.ticks_per_90_deg = 100
 
-    # ────── Helpers ─────────────────────────────────────────────────────────
-    def _stop(self):
+        # Set the control speeds
+        self.linear_speed = 0.5
+        self.angular_speed = 0.5
+        
+        # Task timing
+        self.break_time = rospy.Duration(1.0)
+        self.break_start = None
+        
+        # Initialize encoders and tasks
+        self.right_ticks = 0
+        self.tasks = []
+        self.current_task = None
+        self.is_running = False
+
+        # Initialize timer
+        timer_period = 0.01
+        rospy.Timer(rospy.Duration(timer_period), self.timer_callback)
+
+    def fsm_callback(self, msg):
+        if msg.state == "NORMAL_JOYSTICK_CONTROL":
+            rospy.loginfo("Switching to joystick control")
+            self.is_running = False
+            self.stop_robot()
+        elif msg.state == "LANE_FOLLOWING":            
+            rospy.loginfo("Starting square pattern")
+            # Always reset the task queue and state when entering LANE_FOLLOWING
+            self.is_running = True
+            self.current_task = None
+            self.break_start = None
+            
+            # Reset task queue
+            self.tasks = []
+            # Use default speeds
+            self.add_move_task(0.5)              
+            self.add_turn_task(90)              
+
+            # Override with custom speeds (slow)
+            self.add_move_task(0.5, speed=0.2)   
+            self.add_turn_task(90, angular_speed=0.3)
+
+            # Override with custom speeds (fast)
+            self.add_move_task(0.5, speed=0.8)
+            self.add_turn_task(90, angular_speed=1.0)
+
+ 
+    def stop_robot(self):
         self.cmd_msg.header.stamp = rospy.Time.now()
         self.cmd_msg.v = 0.0
         self.cmd_msg.omega = 0.0
         self.pub.publish(self.cmd_msg)
 
-    # ────── Primitives ──────────────────────────────────────────────────────
-    def move_straight(self, distance_m, v=0.5):
-        direction = 1 if distance_m >= 0 else -1
-        goal_ticks = abs(distance_m) * self.ticks_per_meter
-        start_ticks = self.right_ticks
+    def encoder_callback(self, msg):
+        self.right_ticks = msg.data
 
-        rate = rospy.Rate(50)
-        while abs(self.right_ticks - start_ticks) < goal_ticks and not rospy.is_shutdown():
-            # 4️⃣ If obstacle too close: stop & wait
-            if self.obstacle_detected:
-                rospy.logwarn(f"Obstacle at {self.current_range:.2f} m – stopping")
-                self._stop()
-                # wait loop
-                while self.obstacle_detected and not rospy.is_shutdown():
-                    rate.sleep()
-                rospy.loginfo("Path clear – resuming")
-                # continue driving toward goal, ticks still counted
-            self.cmd_msg.header.stamp = rospy.Time.now()
-            self.cmd_msg.v = v * direction
-            self.cmd_msg.omega = 0.0
-            self.pub.publish(self.cmd_msg)
-            rate.sleep()
+    def left_encoder_callback(self, msg):
+        self.left_ticks = msg.data
+    
+    def timer_callback(self, event):
+        if not self.is_running:
+            return
+            
+        # Handle breaks between tasks
+        if self.break_start is not None:
+            if (rospy.Time.now() - self.break_start) < self.break_time:
+                return  # Still in break, do nothing
+            self.break_start = None  # Break is over
+        
+        # Start new task if needed
+        if self.current_task is None:
+            if not self.tasks:  # No more tasks
+                rospy.loginfo("Square pattern completed!")
+                self.is_running = False
+                return
+                
+            self.current_task = self.tasks.pop(0)
+            self.current_task['start'] = self.right_ticks
+            rospy.loginfo(f"Starting {self.current_task['action']}")
+        
+        # Execute current task
+        task_complete = False
+        if self.current_task['action'] == 'move':
+            task_complete = self.move_ticks()
+        elif self.current_task['action'] == 'turn_ticks':
+            # Initialize on first run
+            if 'start_left' not in self.current_task or 'start_right' not in self.current_task:
+                self.current_task['start_left'] = self.left_ticks
+                self.current_task['start_right'] = self.right_ticks
+            task_complete = self.turn_ticks()
 
-        self._stop()
+        # Handle task completion
+        if task_complete:
+            self.current_task = None
+            self.stop_robot()
+            
+            if self.tasks:  # More tasks remaining
+                self.break_start = rospy.Time.now()
 
-    def rotate_in_place(self, angle_deg, omega=1.0):
+
+    def add_move_task(self, distance, speed=None):
+        if speed is None:
+            speed = self.linear_speed
+        ticks = abs(int(distance * self.ticks_per_meter))
+        direction = 1 if distance >= 0 else -1
+        self.tasks.append({
+            'action': 'move',
+            'ticks': ticks,
+            'speed': abs(speed) * direction
+        })
+
+
+    def add_turn_task(self, angle_deg, angular_speed=None):
+        if angular_speed is None:
+            angular_speed = self.angular_speed
+        ticks = abs(int((angle_deg / 90.0) * self.ticks_per_90_deg))
         direction = 1 if angle_deg >= 0 else -1
-        goal_ticks = abs(angle_deg) / 90.0 * self.ticks_per_90_degrees
-        start_ticks = self.right_ticks
+        self.tasks.append({
+            'action': 'turn_ticks',
+            'ticks': ticks,
+            'speed': abs(angular_speed) * direction
+        })
 
-        rate = rospy.Rate(50)
-        while abs(self.right_ticks - start_ticks) < goal_ticks and not rospy.is_shutdown():
-            if self.obstacle_detected:
-                rospy.logwarn(f"Obstacle at {self.current_range:.2f} m during rotation – stopping")
-                self._stop()
-                while self.obstacle_detected and not rospy.is_shutdown():
-                    rate.sleep()
-                rospy.loginfo("Path clear – resuming rotation")
-            self.cmd_msg.header.stamp = rospy.Time.now()
-            self.cmd_msg.v = 0.0
-            self.cmd_msg.omega = omega * direction
-            self.pub.publish(self.cmd_msg)
-            rate.sleep()
 
-        self._stop()
+    def move_ticks(self):
+        moved_ticks = abs(self.right_ticks - self.current_task['start'])
+        if moved_ticks >= self.current_task['ticks']:
+            return True  # Task complete
+        self.cmd_msg.header.stamp = rospy.Time.now()
+        self.cmd_msg.v = self.current_task['speed']
+        self.cmd_msg.omega = 0.0
+        self.pub.publish(self.cmd_msg)
+        return False
 
-    # ────── Demo ────────────────────────────────────────────────────────────
-    def draw_square(self):
-        rospy.loginfo("Starting closed-loop square…")
-        for _ in range(4):
-            self.move_straight(+1.0, v=0.41)
-            rospy.sleep(0.3)
-            self.rotate_in_place(-90.0, omega=3.0)
-            rospy.sleep(0.3)
-        rospy.loginfo("Square finished ✔")
+    def turn_ticks(self):
+        moved_left = abs(self.left_ticks - self.current_task['start_left'])
+        moved_right = abs(self.right_ticks - self.current_task['start_right'])
+        avg_moved = (moved_left + moved_right) / 2
+        if avg_moved >= self.current_task['ticks']:
+            return True  # Task complete
+        self.cmd_msg.header.stamp = rospy.Time.now()
+        self.cmd_msg.v = 0.0
+        self.cmd_msg.omega = self.current_task['speed']
+        self.pub.publish(self.cmd_msg)
+        return False
 
-    # ────── Run ─────────────────────────────────────────────────────────────
+
     def run(self):
-        rospy.spin()
+        rospy.spin()  # keeps node from exiting until node has shutdown
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     try:
-        ClosedLoopSquare().run()
+        closed_loop_square = ClosedLoopSquare()
+        rospy.sleep(2.0)  # Give system time to initialize
+        closed_loop_square.is_running = True  # Start sequence
+        closed_loop_square.run()
     except rospy.ROSInterruptException:
         pass
+    except Exception as e:
+        rospy.logerr(f"Error in main: {str(e)}")
