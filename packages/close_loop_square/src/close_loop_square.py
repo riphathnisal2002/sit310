@@ -20,17 +20,18 @@ class ClosedLoopSquare:
         
         # Calibration constants
         self.ticks_per_meter = 345
-        self.ticks_per_90_deg = 200  # UPDATED
+        self.ticks_per_90_deg = 150  # UPDATED
 
         # Default control speeds
         self.linear_speed = 0.5
-        self.angular_speed = 0.5
+        self.angular_speed = 8.5
 
         # Timing control
         self.break_time = rospy.Duration(1.0)
         self.break_start = None
 
         self.tasks = []
+
         self.current_task = None
         self.is_running = False
 
@@ -49,7 +50,7 @@ class ClosedLoopSquare:
             self.tasks = []
 
             side_length = 0.5  # meters
-            angular_speed = 0.5
+            angular_speed = 8.5
 
             for _ in range(4):
                 self.add_move_task(side_length)
