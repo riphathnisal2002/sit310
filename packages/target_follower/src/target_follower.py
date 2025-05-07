@@ -9,22 +9,13 @@ class Target_Follower:
         rospy.init_node('target_follower_node', anonymous=True)
         rospy.on_shutdown(self.clean_shutdown)
 
-        self.cmd_vel_pub = rospy.Publisher(
-            '/birdie/car_cmd_switch_node/cmd',
-            Twist2DStamped,
-            queue_size=1
-        )
+        self.cmd_vel_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback, queue_size=1)
 
-        rospy.Subscriber(
-            '/birdie/apriltag_detector_node/detections',
-            AprilTagDetectionArray,
-            self.tag_callback,
-            queue_size=1
-        )
-
-        # Hysteresis control parameters
-        self.omega_fixed = 8.0      # Fixed turn rate
-        self.dead_zone = 0.05       # Neutral zone for no movement
+        # Control parameters
+        self.Kp = 4.5           # Proportional gain
+        self.omega_min = 5.0    # Minimum omega to overcome friction
+        self.omega_max = 12.0    # Cap omega
 
         rospy.spin()
 
@@ -46,31 +37,39 @@ class Target_Follower:
         cmd_msg = Twist2DStamped()
         cmd_msg.header.stamp = rospy.Time.now()
 
-        # Seek Mode: No tag detected
+        # --- Seek Mode: No tag detected ---
         if len(detections) == 0:
             rospy.loginfo("No tag detected. Seeking...")
             cmd_msg.v = 0.0
-            cmd_msg.omega = self.omega_fixed  # Spin in place
+            cmd_msg.omega = 8.5  # Spin to find tag
             self.cmd_vel_pub.publish(cmd_msg)
             return
 
-        # Tag detected
-        x = detections[0].transform.translation.x
-        rospy.loginfo("Tracking tag. x: %.3f", x)
+        # --- Tag detected: Rotate to follow it as it moves ---
+        transform = detections[0].transform.translation
+        x = transform.x  # left-right offset (used for rotation)
+        y = transform.y  # vertical (not used)
+        z = transform.z  # distance (not used)
 
-        # Hysteresis control: turn left or right if outside dead zone
-        if x > self.dead_zone:
-            cmd_msg.omega = self.omega_fixed
-        elif x < -self.dead_zone:
-            cmd_msg.omega = -self.omega_fixed
-        else:
-            cmd_msg.omega = 0.0  # In the center, stop rotating
+        rospy.loginfo("Tracking tag. x: %.3f, y: %.3f, z: %.3f", x, y, z)
 
-        cmd_msg.v = 0.0  # No forward motion
+        # Proportional control
+        omega = self.Kp * x
+
+        # Apply minimum threshold to overcome friction
+        if abs(omega) < self.omega_min and abs(x) > 0.01:
+            omega = self.omega_min * (1 if omega > 0 else -1)
+
+        # Clamp omega
+        omega = max(-self.omega_max, min(self.omega_max, omega))
+
+        # Set velocity: only angular, no forward motion
+        cmd_msg.v = 0.0
+        cmd_msg.omega = omega
         self.cmd_vel_pub.publish(cmd_msg)
 
 if __name__ == '__main__':
     try:
-        Target_Follower()
+        target_follower = Target_Follower()
     except rospy.ROSInterruptException:
         pass
