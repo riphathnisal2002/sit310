@@ -50,31 +50,28 @@ class Target_Follower:
             return
 
         transform = detections[0].transform.translation
-        x = transform.x  # Horizontal offset (left/right)
-        y = transform.y
-        z = transform.z  # Forward distance to tag
+        x = -transform.x  # Flip sign: positive = right, negative = left
+        z = transform.z
 
-        rospy.loginfo("Tracking tag. x: %.3f, y: %.3f, z: %.3f", x, y, z)
+        rospy.loginfo("Tracking tag. x: %.3f, z: %.3f", x, z)
 
         # --- ANGULAR CONTROL ---
-        angular_dead_zone = 0.05  # Ignore small deviations
-
-        if abs(x) > angular_dead_zone:
+        if abs(x) > self.angular_dead_zone:
             omega = self.Kp_angular * x
-
             if abs(omega) < self.omega_min:
                 omega = self.omega_min * (1 if omega > 0 else -1)
-
             omega = max(-self.omega_max, min(self.omega_max, omega))
         else:
-            omega = 0.0  # Within dead zone, no need to turn
+            omega = 0.0
+
+        rospy.loginfo("Computed omega: %.3f", omega)
 
         # --- LINEAR CONTROL ---
         distance_error = z - self.desired_distance
         v = self.Kp_linear * distance_error
 
         if abs(distance_error) < 0.05:
-            v = 0.0  # Close enough to stop moving forward/backward
+            v = 0.0
 
         v = max(-self.v_max, min(self.v_max, v))
 
