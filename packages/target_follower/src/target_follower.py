@@ -14,11 +14,14 @@ class Target_Follower:
         # Control parameters
         self.rotation_speed = 3.0    # Fixed rotation speed (positive = counter-clockwise)
         self.rotation_direction = 1  # 1 = counter-clockwise, -1 = clockwise
-        self.rotation_margin = 0.1   # How far tag can move before robot responds
-        
+
+        # Hysteresis thresholds for right rotation
+        self.start_tracking_threshold = 0.037  # Start rotating if x > this
+        self.stop_tracking_threshold = 0.033   # Stop rotating if x < this
+
         # State variables
         self.tracking_active = False
-        self.last_tag_x = 0.0
+        self.last_tag_x = None
         
         rospy.spin()
         
@@ -60,14 +63,12 @@ class Target_Follower:
         if self.last_tag_x is None:
             self.last_tag_x = x
     
-        # Determine if we need to rotate based on tag movement
+        # Determine if we need to rotate based on tag position with hysteresis
         if not self.tracking_active:
-            # Start rotation if tag is significantly to the right
-            if x > 0.035:
+            if x > self.start_tracking_threshold:
                 self.tracking_active = True
         else:
-            # Stop rotation if tag is now centered
-            if x < 0.035:
+            if x < self.stop_tracking_threshold:
                 self.tracking_active = False
 
         # Save current position for next comparison
