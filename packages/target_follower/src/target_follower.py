@@ -4,6 +4,7 @@ from duckietown_msgs.msg import Twist2DStamped
 from duckietown_msgs.msg import AprilTagDetectionArray
 
 class Target_Follower:
+
     def __init__(self):
         rospy.init_node('target_follower_node', anonymous=True)
         rospy.on_shutdown(self.clean_shutdown)
@@ -16,8 +17,8 @@ class Target_Follower:
         self.rotation_margin = 0.1   # How far tag can move before robot responds
         
         # State variables
-        self.last_tag_x = None
         self.tracking_active = False
+        self.last_tag_x = 0.0
         
         rospy.spin()
         
@@ -58,34 +59,31 @@ class Target_Follower:
         # Initialize last_tag_x if this is the first detection
         if self.last_tag_x is None:
             self.last_tag_x = x
-        
+    
         # Determine if we need to rotate based on tag movement
         if not self.tracking_active:
-            # Start rotation if tag is not centered
-            if abs(x) > self.rotation_margin:
+            # Start rotation if tag is significantly to the right
+            if x > 0.035:
                 self.tracking_active = True
         else:
-            # Check if tag has moved significantly from last position
-            tag_moved = abs(x - self.last_tag_x) > 0.01
-            
-            # Check if tag is now centered enough to stop
-            if abs(x) < self.rotation_margin:
+            # Stop rotation if tag is now centered
+            if x < 0.035:
                 self.tracking_active = False
-        
+
         # Save current position for next comparison
         self.last_tag_x = x
-        
+
         # Apply rotation logic
         if self.tracking_active:
-            # Rotate in the predefined direction at fixed speed
-            cmd_msg.omega = self.rotation_speed * self.rotation_direction
-            rospy.loginfo("Tag tracking active - rotating")
+            # Rotate right at fixed speed
+            cmd_msg.omega = -abs(self.rotation_speed)  # Negative for right rotation
+            rospy.loginfo("Tag off-center to the right - rotating right")
         else:
-            # Tag is centered enough - stop rotating
             cmd_msg.omega = 0.0
-            rospy.loginfo("Tag centered - stopped")
-            
+            rospy.loginfo("Tag centered or not far enough right - stopped")
+
         self.cmd_vel_pub.publish(cmd_msg)
+
 
 if __name__ == '__main__':
     try:
