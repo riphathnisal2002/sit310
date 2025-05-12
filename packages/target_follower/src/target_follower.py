@@ -10,60 +10,68 @@ class Target_Follower:
         rospy.on_shutdown(self.clean_shutdown)
         self.cmd_vel_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
         rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback, queue_size=1)
-        
+
         # Control parameters
-        self.rotation_speed = 3.0    # Fixed rotation speed (positive = counter-clockwise)
-        self.rotation_direction = 1  # 1 = counter-clockwise, -1 = clockwise
+        self.rotation_speed = 3.0
+        self.forward_speed = 0.2
+        self.rotation_threshold = 0.035  # x-axis threshold to decide rotation
+        self.desired_distance = 0.4      # meters
+        self.distance_tolerance = 0.05   # acceptable range around desired distance
 
-        # Hysteresis thresholds for right rotation
-        self.start_tracking_threshold = 0.037  # Start rotating if x > this
-        self.stop_tracking_threshold = 0.033   # Stop rotating if x < this
-
-        # State variables
-        self.tracking_active = False
-        self.last_tag_x = None
-        
         rospy.spin()
-        
+
     def tag_callback(self, msg):
         self.move_robot(msg.detections)
-        
+
     def clean_shutdown(self):
         rospy.loginfo("Shutting down. Stopping robot...")
         self.stop_robot()
-        
+
     def stop_robot(self):
         cmd_msg = Twist2DStamped()
         cmd_msg.header.stamp = rospy.Time.now()
         cmd_msg.v = 0.0
         cmd_msg.omega = 0.0
         self.cmd_vel_pub.publish(cmd_msg)
-        
+
     def move_robot(self, detections):
         cmd_msg = Twist2DStamped()
         cmd_msg.header.stamp = rospy.Time.now()
-        cmd_msg.v = 0.0  # Always keep robot stationary
 
         if len(detections) == 0:
-            rospy.loginfo("No tag detected. Spinning to search...")
-            cmd_msg.omega = self.rotation_speed * self.rotation_direction    
+            rospy.loginfo("No tag detected. Staying stationary.")
+            cmd_msg.v = 0.0
+            cmd_msg.omega = 0.0
             self.cmd_vel_pub.publish(cmd_msg)
             return
 
         # --- Tag detected ---
-        closest_tag = min(detections, key=lambda tag: abs(tag.transform.translation.x))
+        closest_tag = min(detections, key=lambda tag: tag.transform.translation.z)
         x = closest_tag.transform.translation.x
-        rospy.loginfo("Tracking tag. x: %.3f", x)
+        z = closest_tag.transform.translation.z
+        rospy.loginfo("Tag detected. x: %.3f, z: %.3f", x, z)
 
-        if x > 0.035:
+        # --- Rotation control ---
+        if x > self.rotation_threshold:
             cmd_msg.omega = -abs(self.rotation_speed)  # Turn right
-            rospy.loginfo("Tag to the right - rotating right")
-        elif x < -0.035:
+            rospy.loginfo("Rotating right")
+        elif x < -self.rotation_threshold:
             cmd_msg.omega = abs(self.rotation_speed)   # Turn left
-            rospy.loginfo("Tag to the left - rotating left")
+            rospy.loginfo("Rotating left")
         else:
-            cmd_msg.omega = 0.0  # Centered
-            rospy.loginfo("Tag centered - not rotating")
+            cmd_msg.omega = 0.0  # Aligned
+            rospy.loginfo("Tag aligned")
+
+        # --- Forward/backward movement control ---
+        if z > self.desired_distance + self.distance_tolerance:
+            cmd_msg.v = self.forward_speed  # Move forward
+            rospy.loginfo("Moving forward")
+        elif z < self.desired_distance - self.distance_tolerance:
+            cmd_msg.v = -self.forward_speed  # Too close, move back
+            rospy.loginfo("Too close! Moving backward")
+        else:
+            cmd_msg.v = 0.0  # Within acceptable range
+            rospy.loginfo("At optimal distance - stopping")
 
         self.cmd_vel_pub.publish(cmd_msg)
 
