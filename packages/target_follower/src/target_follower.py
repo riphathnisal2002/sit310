@@ -51,6 +51,8 @@ class Target_Follower:
         z = closest_tag.transform.translation.z
         rospy.loginfo("Tag detected. x: %.3f, z: %.3f", x, z)
 
+        aligned = False
+
         # --- Rotation control ---
         if x > self.rotation_threshold:
             cmd_msg.omega = -abs(self.rotation_speed)  # Turn right
@@ -60,18 +62,19 @@ class Target_Follower:
             rospy.loginfo("Rotating left")
         else:
             cmd_msg.omega = 0.0  # Aligned
+            aligned = True
             rospy.loginfo("Tag aligned")
 
-        # --- Forward/backward movement control ---
-        if z > self.desired_distance + self.distance_tolerance:
+        # --- Forward movement only when aligned ---
+        if aligned and z > self.desired_distance + self.distance_tolerance:
             cmd_msg.v = self.forward_speed  # Move forward
             rospy.loginfo("Moving forward")
-        elif z < self.desired_distance - self.distance_tolerance:
-            cmd_msg.v = -self.forward_speed  # Too close, move back
-            rospy.loginfo("Too close! Moving backward")
         else:
-            cmd_msg.v = 0.0  # Within acceptable range
-            rospy.loginfo("At optimal distance - stopping")
+            cmd_msg.v = 0.0  # Stop if not aligned or already close enough
+            if aligned:
+                rospy.loginfo("At optimal distance or not far enough - stopping")
+            else:
+                rospy.loginfo("Not aligned - holding position")
 
         self.cmd_vel_pub.publish(cmd_msg)
 
@@ -79,5 +82,4 @@ class Target_Follower:
 if __name__ == '__main__':
     try:
         target_follower = Target_Follower()
-    except rospy.ROSInterruptException:
-        pass
+
