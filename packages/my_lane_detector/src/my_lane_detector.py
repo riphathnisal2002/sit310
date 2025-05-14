@@ -18,9 +18,9 @@ class LaneDetector:
         np_arr = np.frombuffer(msg.data, np.uint8)
         frame = cv.imdecode(np_arr, cv.IMREAD_COLOR)
 
-        # Crop the image to focus on the road area
+        # Crop the image to focus on a larger road area (for example, upper half)
         height, width, _ = frame.shape
-        cropped = frame[int(height/2):, :]
+        cropped = frame[int(height / 3):, :]  # Adjust the crop area to focus on a larger part of the road
 
         # Convert to HSV
         hsv = cv.cvtColor(cropped, cv.COLOR_BGR2HSV)
@@ -32,7 +32,7 @@ class LaneDetector:
         white_filtered = cv.bitwise_and(cropped, cropped, mask=white_mask)
 
         # Yellow filter
-        lower_yellow = np.array([15, 120, 120])
+        lower_yellow = np.array([15, 100, 120])
         upper_yellow = np.array([35, 255, 255])
         yellow_mask = cv.inRange(hsv, lower_yellow, upper_yellow)
         yellow_filtered = cv.bitwise_and(cropped, cropped, mask=yellow_mask)
@@ -55,7 +55,7 @@ class LaneDetector:
         if white_lines is not None:
             for l in white_lines:
                 x1, y1, x2, y2 = l[0]
-                cv.line(output_lines, (x1, y1), (x2, y2), (255, 255, 255), 2)
+                cv.line(output_lines, (x1, y1), (x2, y2), (0, 0, 255), 2)  # Change white lines to red (BGR format)
 
         if yellow_lines is not None:
             for l in yellow_lines:
@@ -73,3 +73,4 @@ if __name__ == '__main__':
         LaneDetector()
     except rospy.ROSInterruptException:
         pass
+
