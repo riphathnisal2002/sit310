@@ -8,13 +8,13 @@ from sensor_msgs.msg import CompressedImage
 
 class Lane_Detector:
     def __init__(self):
-        self.cv_bridge = CvBridge()
-       self.image_sub = rospy.Subscriber(
-           '/akandb/camera_node/image/compressed',  # <-- Corrected topic name
+        self.cv_bridge = CvBridge()  # Corrected indentation here
+        self.image_sub = rospy.Subscriber(
+            '/akandb/camera_node/image/compressed',  # <-- Corrected topic name
             CompressedImage,
             self.image_callback,
             queue_size=1
-)
+        )
 
         rospy.init_node("my_lane_detector")
 
@@ -78,3 +78,4 @@ if __name__ == "__main__":
         detector.run()
     except rospy.ROSInterruptException:
         pass
+
