@@ -9,12 +9,13 @@ from sensor_msgs.msg import CompressedImage
 class Lane_Detector:
     def __init__(self):
         self.cv_bridge = CvBridge()
-        self.image_sub = rospy.Subscriber(
-            '/akandb>/camera_node/image/compressed',  # <-- Replace <your_robot_name>
+       self.image_sub = rospy.Subscriber(
+           '/akandb/camera_node/image/compressed',  # <-- Corrected topic name
             CompressedImage,
             self.image_callback,
             queue_size=1
-        )
+)
+
         rospy.init_node("my_lane_detector")
 
     def image_callback(self, msg):
