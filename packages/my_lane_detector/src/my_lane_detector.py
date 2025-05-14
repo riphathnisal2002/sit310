@@ -1,68 +1,75 @@
 #!/usr/bin/env python3
 import rospy
-import cv2
+import cv2 as cv
 import numpy as np
 from sensor_msgs.msg import CompressedImage
 from cv_bridge import CvBridge
 
-class LaneDetectorNode:
+class LaneDetector:
     def __init__(self):
-        rospy.init_node("lane_detector_node")
+        rospy.init_node('lane_detector_node')
         self.bridge = CvBridge()
-        rospy.Subscriber("akandb/camera/image/compressed", CompressedImage, self.callback)
+        rospy.Subscriber("/akandb/camera_node/image/compressed", CompressedImage, self.callback)
         rospy.loginfo("Lane Detector Node Started.")
         rospy.spin()
 
     def callback(self, msg):
-        # Convert image
-        img = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+        # Decode the compressed image
+        np_arr = np.frombuffer(msg.data, np.uint8)
+        frame = cv.imdecode(np_arr, cv.IMREAD_COLOR)
 
-        # Crop (adjust as needed)
-        cropped = img[300:480, :]
+        # Crop the image to focus on the road area
+        height, width, _ = frame.shape
+        cropped = frame[int(height/2):, :]
 
         # Convert to HSV
-        hsv = cv2.cvtColor(cropped, cv2.COLOR_BGR2HSV)
+        hsv = cv.cvtColor(cropped, cv.COLOR_BGR2HSV)
 
         # White filter
         lower_white = np.array([0, 0, 200])
-        upper_white = np.array([180, 25, 255])
-        white_mask = cv2.inRange(hsv, lower_white, upper_white)
-        white_filtered = cv2.bitwise_and(cropped, cropped, mask=white_mask)
+        upper_white = np.array([180, 30, 255])
+        white_mask = cv.inRange(hsv, lower_white, upper_white)
+        white_filtered = cv.bitwise_and(cropped, cropped, mask=white_mask)
 
         # Yellow filter
         lower_yellow = np.array([15, 100, 100])
         upper_yellow = np.array([35, 255, 255])
-        yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
-        yellow_filtered = cv2.bitwise_and(cropped, cropped, mask=yellow_mask)
+        yellow_mask = cv.inRange(hsv, lower_yellow, upper_yellow)
+        yellow_filtered = cv.bitwise_and(cropped, cropped, mask=yellow_mask)
 
-        # Canny Edge (on cropped image)
-        gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, 50, 150)
+        # Convert both filtered images to grayscale for edge detection
+        white_gray = cv.cvtColor(white_filtered, cv.COLOR_BGR2GRAY)
+        yellow_gray = cv.cvtColor(yellow_filtered, cv.COLOR_BGR2GRAY)
 
-        # Hough Transform
-        lines_white = cv2.HoughLinesP(white_mask, 1, np.pi / 180, 50, minLineLength=40, maxLineGap=20)
-        lines_yellow = cv2.HoughLinesP(yellow_mask, 1, np.pi / 180, 50, minLineLength=40, maxLineGap=20)
+        # Apply Canny edge detector
+        white_edges = cv.Canny(white_gray, 50, 150)
+        yellow_edges = cv.Canny(yellow_gray, 50, 150)
 
-        # Copy to draw
-        output = cropped.copy()
-        self.draw_lines(output, lines_white, (255, 255, 255))  # white lines in white
-        self.draw_lines(output, lines_yellow, (0, 255, 255))  # yellow lines in yellow
+        # Detect lines using Probabilistic Hough Transform
+        white_lines = cv.HoughLinesP(white_edges, 1, np.pi / 180, 50, minLineLength=50, maxLineGap=10)
+        yellow_lines = cv.HoughLinesP(yellow_edges, 1, np.pi / 180, 50, minLineLength=50, maxLineGap=10)
 
-        # Show OpenCV windows
-        cv2.imshow("White Filtered Image", white_filtered)
-        cv2.imshow("Yellow Filtered Image", yellow_filtered)
-        cv2.imshow("Hough Lines Output", output)
-        cv2.waitKey(1)
+        # Copy for drawing
+        output_lines = cropped.copy()
 
-    def draw_lines(self, img, lines, color):
-        if lines is not None:
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                cv2.line(img, (x1, y1), (x2, y2), color, 3)
+        if white_lines is not None:
+            for l in white_lines:
+                x1, y1, x2, y2 = l[0]
+                cv.line(output_lines, (x1, y1), (x2, y2), (255, 255, 255), 2)
 
-if __name__ == "__main__":
+        if yellow_lines is not None:
+            for l in yellow_lines:
+                x1, y1, x2, y2 = l[0]
+                cv.line(output_lines, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+        # Display all three windows
+        cv.imshow("White Filtered Image", white_filtered)
+        cv.imshow("Yellow Filtered Image", yellow_filtered)
+        cv.imshow("Lane Lines on Road", output_lines)
+        cv.waitKey(1)
+
+if __name__ == '__main__':
     try:
-        LaneDetectorNode()
+        LaneDetector()
     except rospy.ROSInterruptException:
         pass
