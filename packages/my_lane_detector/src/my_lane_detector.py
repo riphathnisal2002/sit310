@@ -47,7 +47,7 @@ class LaneDetector:
 
         # Detect lines using Probabilistic Hough Transform
         white_lines = cv.HoughLinesP(white_edges, 1, np.pi / 180, 50, minLineLength=50, maxLineGap=10)
-        yellow_lines = cv.HoughLinesP(yellow_edges, 1, np.pi / 180, 50, minLineLength=50, maxLineGap=10)
+        yellow_lines = cv.HoughLinesP(yellow_edges, 1, np.pi / 180, 10, minLineLength=10, maxLineGap=10)
 
         # Copy for drawing
         output_lines = cropped.copy()
