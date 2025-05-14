@@ -32,7 +32,7 @@ class LaneDetector:
         white_filtered = cv.bitwise_and(cropped, cropped, mask=white_mask)
 
         # Yellow filter
-        lower_yellow = np.array([15, 100, 100])
+        lower_yellow = np.array([15, 120, 120])
         upper_yellow = np.array([35, 255, 255])
         yellow_mask = cv.inRange(hsv, lower_yellow, upper_yellow)
         yellow_filtered = cv.bitwise_and(cropped, cropped, mask=yellow_mask)
