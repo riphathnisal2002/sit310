@@ -9,7 +9,7 @@ class LaneDetectorNode:
     def __init__(self):
         rospy.init_node("lane_detector_node")
         self.bridge = CvBridge()
-        rospy.Subscriber("/camera/image/compressed", CompressedImage, self.callback)
+        rospy.Subscriber("akandb/camera/image/compressed", CompressedImage, self.callback)
         rospy.loginfo("Lane Detector Node Started.")
         rospy.spin()
 
