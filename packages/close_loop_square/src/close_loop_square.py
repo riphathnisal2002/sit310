@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 import rospy
+import math
 from duckietown_msgs.msg import WheelEncoderStamped, Twist2DStamped, FSMState
-from sensor_msgs.msg import Range
-
+from sensor_msgs.msg import Range  # TOF sensor message
 
 class ClosedLoopSquare:
     def __init__(self):
@@ -18,24 +18,32 @@ class ClosedLoopSquare:
         rospy.Subscriber('/birdie/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
         rospy.Subscriber('/birdie/left_wheel_encoder_node/tick', WheelEncoderStamped, self.left_encoder_callback)
         rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
-        rospy.Subscriber('/birdie/tof_driver_node/range', Range, self.tof_callback)
+        rospy.Subscriber('/birdie/tof_driver_node/range', Range, self.tof_callback)  # TOF sensor subscriber
 
         # Calibration constants
         self.ticks_per_meter = 545
-        self.ticks_per_90_deg = 50  # approx calibration
+        self.ticks_per_90_deg = 50  # Adjust as needed
 
         # Default control speeds
         self.linear_speed = 0.5
         self.angular_speed = 8.5
 
+        # Timing control
         self.break_time = rospy.Duration(1.0)
         self.break_start = None
+
         self.tasks = []
         self.current_task = None
         self.is_running = False
-        self.obstacle_detected = False
+
+        # TOF sensor
+        self.tof_distance = float('inf')
+        self.tof_threshold = 0.25  # 25 cm
 
         rospy.Timer(rospy.Duration(0.01), self.timer_callback)
+
+    def tof_callback(self, msg):
+        self.tof_distance = msg.range
 
     def fsm_callback(self, msg):
         if msg.state == "NORMAL_JOYSTICK_CONTROL":
@@ -50,6 +58,7 @@ class ClosedLoopSquare:
             self.tasks = []
 
             side_length = 0.5  # meters
+
             for _ in range(4):
                 self.add_move_task(side_length)
                 self.add_turn_task(90)
@@ -70,8 +79,9 @@ class ClosedLoopSquare:
         if not self.is_running:
             return
 
-        if self.obstacle_detected:
-            rospy.loginfo_throttle(2, "Obstacle detected! Pausing.")
+        # Check for obstacle
+        if self.tof_distance < self.tof_threshold:
+            rospy.logwarn("Obstacle detected within 25cm. Pausing...")
             self.stop_robot()
             return
 
@@ -140,7 +150,7 @@ class ClosedLoopSquare:
     def turn_ticks(self):
         moved_left = abs(self.left_ticks - self.current_task['start_left'])
         moved_right = abs(self.right_ticks - self.current_task['start_right'])
-        avg_moved = (moved_left + moved_right) / 2.0
+        avg_moved = (moved_left + moved_right) / 2
 
         rospy.loginfo(f"Turning... Left: {moved_left}, Right: {moved_right}, Avg: {avg_moved}, Target: {self.current_task['ticks']}")
 
@@ -152,18 +162,14 @@ class ClosedLoopSquare:
         self.pub.publish(self.cmd_msg)
         return False
 
-    def tof_callback(self, msg):
-        # Object within 10 cm
-        self.obstacle_detected = msg.range <= 0.1
-
     def run(self):
         rospy.spin()
-
 
 if __name__ == '__main__':
     try:
         closed_loop_square = ClosedLoopSquare()
-        rospy.sleep(2.0)  # Give time for setup
+        rospy.sleep(2.0)
+        closed_loop_square.is_running = True
         closed_loop_square.run()
     except rospy.ROSInterruptException:
         pass
