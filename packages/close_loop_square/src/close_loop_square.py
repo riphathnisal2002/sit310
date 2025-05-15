@@ -20,7 +20,7 @@ class ClosedLoopSquare:
         
         # Calibration constants
         self.ticks_per_meter = 545
-        self.ticks_per_90_deg = 50  # UPDATED
+        self.ticks_per_90_deg = 45  # UPDATED
 
         # Default control speeds
         self.linear_speed = 0.5
@@ -51,9 +51,9 @@ class ClosedLoopSquare:
 
             side_length = 0.5  # meters
             
-            self.add_turn_task(360, angular_speed=5)
+            self.add_turn_task(360, angular_speed=4)
             self.add_wait_task(2.0)  # wait 2 seconds
-            self.add_turn_task(360, angular_speed=10)
+            self.add_turn_task(360, angular_speed=7)
 
             
     def stop_robot(self):
