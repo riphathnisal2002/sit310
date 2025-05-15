@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 
 import rospy
-import math
 from duckietown_msgs.msg import WheelEncoderStamped, Twist2DStamped, FSMState
+from sensor_msgs.msg import Range
+
 
 class ClosedLoopSquare:
     def __init__(self):
         self.cmd_msg = Twist2DStamped()
         rospy.init_node('closed_loop_square_node', anonymous=True)
         rospy.loginfo("Node initialized")
-        
+
         self.left_ticks = 0
         self.right_ticks = 0
 
@@ -17,23 +18,22 @@ class ClosedLoopSquare:
         rospy.Subscriber('/birdie/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
         rospy.Subscriber('/birdie/left_wheel_encoder_node/tick', WheelEncoderStamped, self.left_encoder_callback)
         rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
-        
+        rospy.Subscriber('/birdie/tof_driver_node/range', Range, self.tof_callback)
+
         # Calibration constants
         self.ticks_per_meter = 545
-        self.ticks_per_90_deg = 50  # UPDATED
+        self.ticks_per_90_deg = 50  # approx calibration
 
         # Default control speeds
         self.linear_speed = 0.5
         self.angular_speed = 8.5
 
-        # Timing control
         self.break_time = rospy.Duration(1.0)
         self.break_start = None
-
         self.tasks = []
-
         self.current_task = None
         self.is_running = False
+        self.obstacle_detected = False
 
         rospy.Timer(rospy.Duration(0.01), self.timer_callback)
 
@@ -50,12 +50,10 @@ class ClosedLoopSquare:
             self.tasks = []
 
             side_length = 0.5  # meters
-            
-            self.add_turn_task(360, angular_speed=5)
-            self.add_wait_task(2.0)  # wait 2 seconds
-            self.add_turn_task(360, angular_speed=7)
+            for _ in range(4):
+                self.add_move_task(side_length)
+                self.add_turn_task(90)
 
-            
     def stop_robot(self):
         self.cmd_msg.header.stamp = rospy.Time.now()
         self.cmd_msg.v = 0.0
@@ -70,6 +68,11 @@ class ClosedLoopSquare:
 
     def timer_callback(self, event):
         if not self.is_running:
+            return
+
+        if self.obstacle_detected:
+            rospy.loginfo_throttle(2, "Obstacle detected! Pausing.")
+            self.stop_robot()
             return
 
         if self.break_start is not None:
@@ -95,14 +98,6 @@ class ClosedLoopSquare:
                 self.current_task['start_left'] = self.left_ticks
                 self.current_task['start_right'] = self.right_ticks
             task_complete = self.turn_ticks()
-
-        elif self.current_task['action'] == 'wait':
-            if self.current_task['start_time'] is None:
-                self.current_task['start_time'] = rospy.Time.now()
-                rospy.loginfo(f"Waiting for {self.current_task['duration'].to_sec()} seconds")
-
-            if rospy.Time.now() - self.current_task['start_time'] >= self.current_task['duration']:
-                task_complete = True
 
         if task_complete:
             self.current_task = None
@@ -145,7 +140,7 @@ class ClosedLoopSquare:
     def turn_ticks(self):
         moved_left = abs(self.left_ticks - self.current_task['start_left'])
         moved_right = abs(self.right_ticks - self.current_task['start_right'])
-        avg_moved = (moved_left + moved_right) / 2
+        avg_moved = (moved_left + moved_right) / 2.0
 
         rospy.loginfo(f"Turning... Left: {moved_left}, Right: {moved_right}, Avg: {avg_moved}, Target: {self.current_task['ticks']}")
 
@@ -157,22 +152,18 @@ class ClosedLoopSquare:
         self.pub.publish(self.cmd_msg)
         return False
 
+    def tof_callback(self, msg):
+        # Object within 10 cm
+        self.obstacle_detected = msg.range <= 0.1
+
     def run(self):
         rospy.spin()
-
-    def add_wait_task(self, duration):
-        self.tasks.append({
-            'action': 'wait',
-            'duration': rospy.Duration(duration),
-            'start_time': None
-        })
 
 
 if __name__ == '__main__':
     try:
         closed_loop_square = ClosedLoopSquare()
-        rospy.sleep(2.0)
-        closed_loop_square.is_running = True
+        rospy.sleep(2.0)  # Give time for setup
         closed_loop_square.run()
     except rospy.ROSInterruptException:
         pass
