@@ -51,7 +51,7 @@ class ClosedLoopSquare:
 
             side_length = 0.5  # meters
             
-            self.add_turn_task(360, angular_speed=4)
+            self.add_turn_task(360, angular_speed=5)
             self.add_wait_task(2.0)  # wait 2 seconds
             self.add_turn_task(360, angular_speed=7)
 
