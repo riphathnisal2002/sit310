@@ -50,12 +50,12 @@ class ClosedLoopSquare:
             self.tasks = []
 
             side_length = 0.5  # meters
-            
-            self.add_turn_task(360, angular_speed=5)
-            self.add_wait_task(2.0)  # wait 2 seconds
-            self.add_turn_task(360, angular_speed=10)
+            angular_speed = 8.5
 
-            
+            for _ in range(4):
+                self.add_move_task(side_length)
+                self.add_turn_task(90, angular_speed)
+
     def stop_robot(self):
         self.cmd_msg.header.stamp = rospy.Time.now()
         self.cmd_msg.v = 0.0
@@ -95,14 +95,6 @@ class ClosedLoopSquare:
                 self.current_task['start_left'] = self.left_ticks
                 self.current_task['start_right'] = self.right_ticks
             task_complete = self.turn_ticks()
-
-        elif self.current_task['action'] == 'wait':
-            if self.current_task['start_time'] is None:
-                self.current_task['start_time'] = rospy.Time.now()
-                rospy.loginfo(f"Waiting for {self.current_task['duration'].to_sec()} seconds")
-
-            if rospy.Time.now() - self.current_task['start_time'] >= self.current_task['duration']:
-                task_complete = True
 
         if task_complete:
             self.current_task = None
@@ -159,14 +151,6 @@ class ClosedLoopSquare:
 
     def run(self):
         rospy.spin()
-
-    def add_wait_task(self, duration):
-        self.tasks.append({
-            'action': 'wait',
-            'duration': rospy.Duration(duration),
-            'start_time': None
-        })
-
 
 if __name__ == '__main__':
     try:
