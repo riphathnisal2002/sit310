@@ -20,7 +20,7 @@ class ClosedLoopSquare:
         
         # Calibration constants
         self.ticks_per_meter = 545
-        self.ticks_per_90_deg = 45  # UPDATED
+        self.ticks_per_90_deg = 50  # UPDATED
 
         # Default control speeds
         self.linear_speed = 0.5
