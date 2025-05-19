@@ -1,21 +1,22 @@
 import cv2 as cv
 import matplotlib.pyplot as plt
+import math
 
 # Load your saved image
 img = cv.imread('/data/lane_image.png')
 gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
 # Apply Canny edge detection
-edges = cv.Canny(gray, 50, 150)
+edges = cv.Canny(gray, 30, 150)
 
 # Parameters to vary
-min_lengths = [20, 50, 100]  # Change this list to experiment
+min_lengths = [10, 50, 120]  # Change this list to experiment
 
 plt.figure(figsize=(15, 5))
 
 for i, min_len in enumerate(min_lengths):
     # Apply Hough Line Transform
-    lines = cv.HoughLinesP(edges, 1, cv.cv2.PI / 180, threshold=50,
+    lines = cv.HoughLinesP(edges, 1, math.pi / 360, threshold=50,
                            minLineLength=min_len, maxLineGap=10)
 
     # Draw lines on a copy of original image
