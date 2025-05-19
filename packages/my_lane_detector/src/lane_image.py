@@ -2,7 +2,7 @@ import cv2 as cv
 import matplotlib.pyplot as plt
 
 # Load the image
-img = cv.imread('/home/ubuntu/sit310/packages/my_lane_detector/image_lane.png')
+img = cv.imread('/data/lane_image.png')
 gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
 # Threshold pairs to test
@@ -20,5 +20,5 @@ for i, (low, high) in enumerate(thresholds):
 
 plt.suptitle("Canny Edge Detection with Varying Thresholds")
 plt.tight_layout()
-plt.savefig('/home/ubuntu/Documents/canny_results.png')
+plt.savefig('/data/canny_results.png')
 plt.show()
