@@ -46,7 +46,7 @@ output_dark = detect_lanes('/data/lane_dark.png')
 output_bright = detect_lanes('/data/lane_bright.png')
 
 # Resize (optional): shrink both slightly for display
-scale = 0.75  # Or adjust to fit your screen
+scale = 1  # Or adjust to fit your screen
 output_dark_resized = cv.resize(output_dark, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
 output_bright_resized = cv.resize(output_bright, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
 
