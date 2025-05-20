@@ -44,5 +44,5 @@ def detect_lanes(image_path):
     cv.destroyAllWindows()
 
 # Run detection on both lighting conditions
-detect_lanes('/home/your_name/duckie_darker.jpg')
-detect_lanes('/home/your_name/duckie_brighter.jpg')
+detect_lanes('/data/lane_dark.png')
+detect_lanes('/data/lane_bright.png')
