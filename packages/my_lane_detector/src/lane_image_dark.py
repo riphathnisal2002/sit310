@@ -3,20 +3,22 @@ import numpy as np
 
 def detect_lanes(image_path):
     frame = cv.imread(image_path)
+    height, width, _ = frame.shape
+    cropped = frame[int(height / 5):, :]  # Slight crop to focus on road
 
-    hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
-
+    hsv = cv.cvtColor(cropped, cv.COLOR_BGR2HSV)
+    
     # White mask
     lower_white = np.array([0, 0, 200])
     upper_white = np.array([180, 30, 255])
     white_mask = cv.inRange(hsv, lower_white, upper_white)
-    white_filtered = cv.bitwise_and(frame, frame, mask=white_mask)
+    white_filtered = cv.bitwise_and(cropped, cropped, mask=white_mask)
 
     # Yellow mask
     lower_yellow = np.array([15, 30, 20])
     upper_yellow = np.array([35, 255, 255])
     yellow_mask = cv.inRange(hsv, lower_yellow, upper_yellow)
-    yellow_filtered = cv.bitwise_and(frame, frame, mask=yellow_mask)
+    yellow_filtered = cv.bitwise_and(cropped, cropped, mask=yellow_mask)
 
     # Edge detection
     white_gray = cv.cvtColor(white_filtered, cv.COLOR_BGR2GRAY)
@@ -29,7 +31,7 @@ def detect_lanes(image_path):
     yellow_lines = cv.HoughLinesP(yellow_edges, 1, np.pi / 360, 10, minLineLength=10, maxLineGap=10)
 
     # Draw lines
-    output = frame.copy()
+    output = cropped.copy()
     if white_lines is not None:
         for l in white_lines:
             x1, y1, x2, y2 = l[0]
@@ -45,17 +47,17 @@ def detect_lanes(image_path):
 output_dark = detect_lanes('/data/lane_dark.png')
 output_bright = detect_lanes('/data/lane_bright.png')
 
-# Resize (optional): shrink both slightly for display
-scale = 0.5  # Or adjust to fit your screen
-output_dark_resized = cv.resize(output_dark, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
-output_bright_resized = cv.resize(output_bright, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
+# Make output bigger (lengthwise)
+scale = 1.5  # Try 2.0 if you want it even wider
+output_dark_resized = cv.resize(output_dark, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
+output_bright_resized = cv.resize(output_bright, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
 
 # Combine side-by-side
 combined = cv.hconcat([output_dark_resized, output_bright_resized])
 
 # Show and save
-cv.imshow("Lane Detection (No Crop) - Dark vs Bright", combined)
-cv.imwrite("lane_comparison_no_crop.png", combined)
+cv.imshow("Lane Detection - Dark vs Bright (Wider View)", combined)
+cv.imwrite("lane_comparison_wide.png", combined)
 cv.waitKey(0)
 cv.destroyAllWindows()
 
