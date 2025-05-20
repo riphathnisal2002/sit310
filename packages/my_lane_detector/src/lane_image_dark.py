@@ -39,7 +39,7 @@ def detect_lanes(image_path):
             cv.line(output, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
     cv.imshow(f"Lane Detection - {image_path}", output)
-    cv.imwrite(f"{image_path.replace('.jpg', '_lanes.jpg')}", output)
+    cv.imwrite(f"{image_path.replace('.png', '_lanes.png')}", output)
     cv.waitKey(0)
     cv.destroyAllWindows()
 
