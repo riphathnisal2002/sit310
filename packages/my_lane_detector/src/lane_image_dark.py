@@ -46,16 +46,19 @@ def detect_lanes(image_path):
 
     return output
 
-# Load and process both full images
+# Run detection
 output_dark = detect_lanes('/data/dark_lane.png')
 output_bright = detect_lanes('/data/bright_lane.png')
 
-# Resize images if needed (scale = 1 means original size)
-scale = 1
+# Resize if needed
+scale = 1  # Keep original size
 output_dark_resized = cv.resize(output_dark, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
 output_bright_resized = cv.resize(output_bright, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
 
-# Show each image separately
+# Show each image
 cv.imshow("Lane Detection - Dark", output_dark_resized)
-cv.imshow("Lane Detection - Bright", outpu
+cv.imshow("Lane Detection - Bright", output_bright_resized)
+
+cv.waitKey(0)
+cv.destroyAllWindows()
 
