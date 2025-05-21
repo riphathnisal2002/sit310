@@ -4,9 +4,7 @@ import numpy as np
 def detect_lanes(image_path):
     frame = cv.imread(image_path)
     height, width, _ = frame.shape
-    # Removed the cropping line and kept the full image
-    # cropped = frame[int(height / 5):, :]  # No cropping now
-
+    # No cropping here, use the full image
     hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
     
     # White mask
@@ -32,7 +30,7 @@ def detect_lanes(image_path):
     yellow_lines = cv.HoughLinesP(yellow_edges, 1, np.pi / 360, 10, minLineLength=10, maxLineGap=10)
 
     # Draw lines
-    output = frame.copy()  # No cropping here
+    output = frame.copy()  # Use the full image
     if white_lines is not None:
         for l in white_lines:
             x1, y1, x2, y2 = l[0]
@@ -48,17 +46,15 @@ def detect_lanes(image_path):
 output_dark = detect_lanes('/data/lane_dark.png')
 output_bright = detect_lanes('/data/lane_bright.png')
 
-# Make output bigger (lengthwise)
-scale = 1.5  # Try 2.0 if you want it even wider
+# Make output a little less wide (adjusted scale)
+scale = 1  # Changed from 1.5 to 1.2 for a less wide image
 output_dark_resized = cv.resize(output_dark, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
 output_bright_resized = cv.resize(output_bright, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
 
-# Combine side-by-side
-combined = cv.hconcat([output_dark_resized, output_bright_resized])
+# Show each image separately
+cv.imshow("Lane Detection - Dark", output_dark_resized)
+cv.imshow("Lane Detection - Bright", output_bright_resized)
 
-# Show and save
-cv.imshow("Lane Detection - Dark vs Bright (Wider View)", combined)
-cv.imwrite("lane_comparison_wide.png", combined)
 cv.waitKey(0)
 cv.destroyAllWindows()
 
