@@ -3,6 +3,7 @@
 import rospy
 import math
 from duckietown_msgs.msg import WheelEncoderStamped, Twist2DStamped, FSMState
+from sensor_msgs.msg import Range  # TOF sensor message
 
 class ClosedLoopSquare:
     def __init__(self):
@@ -17,10 +18,11 @@ class ClosedLoopSquare:
         rospy.Subscriber('/birdie/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
         rospy.Subscriber('/birdie/left_wheel_encoder_node/tick', WheelEncoderStamped, self.left_encoder_callback)
         rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
+        rospy.Subscriber('/birdie/tof_driver_node/range', Range, self.tof_callback)  # TOF sensor subscriber
 
         # Calibration constants
         self.ticks_per_meter = 545
-        self.ticks_per_90_deg = 50  # 360 deg = 200 ticks
+        self.ticks_per_90_deg = 50  # Adjust as needed
 
         # Default control speeds
         self.linear_speed = 0.5
@@ -34,7 +36,14 @@ class ClosedLoopSquare:
         self.current_task = None
         self.is_running = False
 
+        # TOF sensor
+        self.tof_distance = float('inf')
+        self.tof_threshold = 0.25  # 25 cm
+
         rospy.Timer(rospy.Duration(0.01), self.timer_callback)
+
+    def tof_callback(self, msg):
+        self.tof_distance = msg.range
 
     def fsm_callback(self, msg):
         if msg.state == "NORMAL_JOYSTICK_CONTROL":
@@ -42,16 +51,17 @@ class ClosedLoopSquare:
             self.is_running = False
             self.stop_robot()
         elif msg.state == "LANE_FOLLOWING":
-            rospy.loginfo("Starting circular motion pattern")
+            rospy.loginfo("Starting square pattern")
             self.is_running = True
             self.current_task = None
             self.break_start = None
             self.tasks = []
-    
-            # Add two full 360-degree turns at different speeds
-            self.add_turn_task(360, angular_speed=5)
-            self.tasks.append({'action': 'wait', 'duration': rospy.Duration(2.0)})
-            self.add_turn_task(360, angular_speed=7)
+
+            side_length = 0.5  # meters
+
+            for _ in range(4):
+                self.add_move_task(side_length)
+                self.add_turn_task(90)
 
     def stop_robot(self):
         self.cmd_msg.header.stamp = rospy.Time.now()
@@ -69,48 +79,41 @@ class ClosedLoopSquare:
         if not self.is_running:
             return
 
-        # Wait period handler
+        # Check for obstacle
+        if self.tof_distance < self.tof_threshold:
+            rospy.logwarn("Obstacle detected within 25cm. Pausing...")
+            self.stop_robot()
+            return
+
         if self.break_start is not None:
             if (rospy.Time.now() - self.break_start) < self.break_time:
                 return
             self.break_start = None
 
-        # Load new task if none is running
         if self.current_task is None:
             if not self.tasks:
-                rospy.loginfo("Pattern completed!")
+                rospy.loginfo("Square pattern completed!")
                 self.is_running = False
                 return
 
             self.current_task = self.tasks.pop(0)
-
-            if self.current_task['action'] == 'wait':
-                rospy.loginfo(f"Waiting for {self.current_task['duration'].to_sec()} seconds...")
-                self.break_start = rospy.Time.now()
-                self.break_time = self.current_task['duration']
-                self.current_task = None
-                return
-
-            elif self.current_task['action'] == 'turn_ticks':
-                self.current_task['start_left'] = self.left_ticks
-                self.current_task['start_right'] = self.right_ticks
-
             self.current_task['start'] = self.right_ticks
             rospy.loginfo(f"Starting task: {self.current_task['action']}")
 
-        # Execute current task
-        if self.current_task:
-            if self.current_task['action'] == 'move':
-                if self.move_ticks():
-                    self.stop_robot()
-                    self.current_task = None
+        task_complete = False
+        if self.current_task['action'] == 'move':
+            task_complete = self.move_ticks()
+        elif self.current_task['action'] == 'turn_ticks':
+            if 'start_left' not in self.current_task or 'start_right' not in self.current_task:
+                self.current_task['start_left'] = self.left_ticks
+                self.current_task['start_right'] = self.right_ticks
+            task_complete = self.turn_ticks()
 
-            elif self.current_task['action'] == 'turn_ticks':
-                if self.turn_ticks():
-                    self.stop_robot()
-                    self.current_task = None
-
-
+        if task_complete:
+            self.current_task = None
+            self.stop_robot()
+            if self.tasks:
+                self.break_start = rospy.Time.now()
 
     def add_move_task(self, distance, speed=None):
         if speed is None:
