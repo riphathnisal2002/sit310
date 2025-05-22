@@ -69,12 +69,14 @@ class ClosedLoopSquare:
         if not self.is_running:
             return
 
-        if self.current_task is None:
-            if self.break_start is not None:
-                if (rospy.Time.now() - self.break_start) < self.break_time:
-                    return
-                self.break_start = None
+        # Wait period handler
+        if self.break_start is not None:
+            if (rospy.Time.now() - self.break_start) < self.break_time:
+                return
+            self.break_start = None
 
+        # Load new task if none is running
+        if self.current_task is None:
             if not self.tasks:
                 rospy.loginfo("Pattern completed!")
                 self.is_running = False
@@ -89,23 +91,26 @@ class ClosedLoopSquare:
                 self.current_task = None
                 return
 
+            elif self.current_task['action'] == 'turn_ticks':
+                self.current_task['start_left'] = self.left_ticks
+                self.current_task['start_right'] = self.right_ticks
+
             self.current_task['start'] = self.right_ticks
             rospy.loginfo(f"Starting task: {self.current_task['action']}")
 
-        task_complete = False
-        if self.current_task['action'] == 'move':
-            task_complete = self.move_ticks()
-        elif self.current_task['action'] == 'turn_ticks':
-            if 'start_left' not in self.current_task or 'start_right' not in self.current_task:
-                self.current_task['start_left'] = self.left_ticks
-                self.current_task['start_right'] = self.right_ticks
-            task_complete = self.turn_ticks()
+        # Execute current task
+        if self.current_task:
+            if self.current_task['action'] == 'move':
+                if self.move_ticks():
+                    self.stop_robot()
+                    self.current_task = None
 
-        if task_complete:
-            self.current_task = None
-            self.stop_robot()
-            if self.tasks and self.tasks[0]['action'] != 'wait':
-                self.break_start = rospy.Time.now()
+            elif self.current_task['action'] == 'turn_ticks':
+                if self.turn_ticks():
+                    self.stop_robot()
+                    self.current_task = None
+
+
 
     def add_move_task(self, distance, speed=None):
         if speed is None:
