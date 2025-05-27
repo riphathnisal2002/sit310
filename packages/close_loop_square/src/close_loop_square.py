@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 
 import rospy
-import math
 from duckietown_msgs.msg import WheelEncoderStamped, Twist2DStamped, FSMState
 
-class ClosedLoopSquare:
+class ClosedLoopRotation:
     def __init__(self):
         self.cmd_msg = Twist2DStamped()
-        rospy.init_node('closed_loop_square_node', anonymous=True)
+        rospy.init_node('closed_loop_rotation_node', anonymous=True)
         rospy.loginfo("Node initialized")
 
         self.left_ticks = 0
@@ -19,19 +18,13 @@ class ClosedLoopSquare:
         rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
 
         # Calibration constants
-        self.ticks_per_meter = 545
-        self.ticks_per_90_deg = 50  # UPDATED
-
-        # Default control speeds
-        self.linear_speed = 0.1
-        self.angular_speed = 8.5
+        self.ticks_per_90_deg = 50
 
         # Timing control
-        self.break_time = rospy.Duration(1.0)
+        self.break_time = rospy.Duration(1.0)  # 1-second pause
         self.break_start = None
 
         self.tasks = []
-
         self.current_task = None
         self.is_running = False
 
@@ -43,18 +36,14 @@ class ClosedLoopSquare:
             self.is_running = False
             self.stop_robot()
         elif msg.state == "LANE_FOLLOWING":
-            rospy.loginfo("Starting square pattern")
+            rospy.loginfo("Starting 2-speed 360 turns")
             self.is_running = True
             self.current_task = None
             self.break_start = None
             self.tasks = []
 
-            side_length = 0.01  # meters
-
-            for _ in range(1):
-                self.add_turn_task(360, angular_speed=5)
-                self.add_move_task(side_length)
-                self.add_turn_task(360, angular_speed=7)
+            self.add_turn_task(360, angular_speed=3.0)
+            self.add_turn_task(360, angular_speed=8.5)
 
     def stop_robot(self):
         self.cmd_msg.header.stamp = rospy.Time.now()
@@ -79,21 +68,17 @@ class ClosedLoopSquare:
 
         if self.current_task is None:
             if not self.tasks:
-                rospy.loginfo("Square pattern completed!")
+                rospy.loginfo("Rotation tasks completed!")
                 self.is_running = False
                 return
 
             self.current_task = self.tasks.pop(0)
-            self.current_task['start'] = self.right_ticks
-            rospy.loginfo(f"Starting task: {self.current_task['action']}")
+            self.current_task['start_left'] = self.left_ticks
+            self.current_task['start_right'] = self.right_ticks
+            rospy.loginfo(f"Starting task: {self.current_task['action']} with speed {self.current_task['speed']}")
 
         task_complete = False
-        if self.current_task['action'] == 'move':
-            task_complete = self.move_ticks()
-        elif self.current_task['action'] == 'turn_ticks':
-            if 'start_left' not in self.current_task or 'start_right' not in self.current_task:
-                self.current_task['start_left'] = self.left_ticks
-                self.current_task['start_right'] = self.right_ticks
+        if self.current_task['action'] == 'turn_ticks':
             task_complete = self.turn_ticks()
 
         if task_complete:
@@ -102,20 +87,7 @@ class ClosedLoopSquare:
             if self.tasks:
                 self.break_start = rospy.Time.now()
 
-    def add_move_task(self, distance, speed=None):
-        if speed is None:
-            speed = self.linear_speed
-        ticks = abs(int(distance * self.ticks_per_meter))
-        direction = 1 if distance >= 0 else -1
-        self.tasks.append({
-            'action': 'move',
-            'ticks': ticks,
-            'speed': abs(speed) * direction
-        })
-
-    def add_turn_task(self, angle_deg, angular_speed=None):
-        if angular_speed is None:
-            angular_speed = self.angular_speed
+    def add_turn_task(self, angle_deg, angular_speed):
         ticks = abs(int((angle_deg / 90.0) * self.ticks_per_90_deg))
         direction = 1 if angle_deg >= 0 else -1
         self.tasks.append({
@@ -123,16 +95,6 @@ class ClosedLoopSquare:
             'ticks': ticks,
             'speed': abs(angular_speed) * direction
         })
-
-    def move_ticks(self):
-        moved_ticks = abs(self.right_ticks - self.current_task['start'])
-        if moved_ticks >= self.current_task['ticks']:
-            return True
-        self.cmd_msg.header.stamp = rospy.Time.now()
-        self.cmd_msg.v = self.current_task['speed']
-        self.cmd_msg.omega = 0.0
-        self.pub.publish(self.cmd_msg)
-        return False
 
     def turn_ticks(self):
         moved_left = abs(self.left_ticks - self.current_task['start_left'])
@@ -143,6 +105,7 @@ class ClosedLoopSquare:
 
         if avg_moved >= self.current_task['ticks']:
             return True
+
         self.cmd_msg.header.stamp = rospy.Time.now()
         self.cmd_msg.v = 0.0
         self.cmd_msg.omega = self.current_task['speed']
@@ -154,11 +117,11 @@ class ClosedLoopSquare:
 
 if __name__ == '__main__':
     try:
-        closed_loop_square = ClosedLoopSquare()
+        closed_loop_rotation = ClosedLoopRotation()
         rospy.sleep(2.0)
-        closed_loop_square.is_running = True
-        closed_loop_square.run()
+        closed_loop_rotation.is_running = True
+        closed_loop_rotation.run()
     except rospy.ROSInterruptException:
         pass
     except Exception as e:
-        rospy.logerr(f"Error in main: {str(e)}")
+        rospy.logerr(f"Error in main: {str(e)}")s
