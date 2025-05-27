@@ -50,7 +50,6 @@ class ClosedLoopSquare:
             self.tasks = []
 
             side_length = 0.01  # meters
-            angular_speed = 8.5
 
             for _ in range(1):
                 self.add_turn_task(360, angular_speed=5)
