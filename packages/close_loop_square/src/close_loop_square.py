@@ -124,4 +124,4 @@ if __name__ == '__main__':
     except rospy.ROSInterruptException:
         pass
     except Exception as e:
-        rospy.logerr(f"Error in main: {str(e)}")s
+        rospy.logerr(f"Error in main: {str(e)}")
