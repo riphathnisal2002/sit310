@@ -3,6 +3,7 @@
 import rospy
 import math
 from duckietown_msgs.msg import WheelEncoderStamped, Twist2DStamped, FSMState
+from sensor_msgs.msg import Range  # TOF sensor message
 
 class ClosedLoopSquare:
     def __init__(self):
@@ -17,13 +18,14 @@ class ClosedLoopSquare:
         rospy.Subscriber('/birdie/right_wheel_encoder_node/tick', WheelEncoderStamped, self.encoder_callback)
         rospy.Subscriber('/birdie/left_wheel_encoder_node/tick', WheelEncoderStamped, self.left_encoder_callback)
         rospy.Subscriber('/birdie/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
+        rospy.Subscriber('/birdie/tof_driver_node/range', Range, self.tof_callback)  # TOF sensor subscriber
 
         # Calibration constants
         self.ticks_per_meter = 545
-        self.ticks_per_90_deg = 50  # UPDATED
+        self.ticks_per_90_deg = 50  # Adjust as needed
 
         # Default control speeds
-        self.linear_speed = 0.1
+        self.linear_speed = 0.5
         self.angular_speed = 8.5
 
         # Timing control
@@ -31,15 +33,21 @@ class ClosedLoopSquare:
         self.break_start = None
 
         self.tasks = []
-
         self.current_task = None
         self.is_running = False
 
+        # TOF sensor
+        self.tof_distance = float('inf')
+        self.tof_threshold = 0.25  # 25 cm
+
         rospy.Timer(rospy.Duration(0.01), self.timer_callback)
+
+    def tof_callback(self, msg):
+        self.tof_distance = msg.range
 
     def fsm_callback(self, msg):
         if msg.state == "NORMAL_JOYSTICK_CONTROL":
-        rospy.loginfo("Switching to joystick control")
+            rospy.loginfo("Switching to joystick control")
             self.is_running = False
             self.stop_robot()
         elif msg.state == "LANE_FOLLOWING":
@@ -49,12 +57,11 @@ class ClosedLoopSquare:
             self.break_start = None
             self.tasks = []
 
-            side_length = 0.01  # meters
+            side_length = 0.5  # meters
 
-            for _ in range(1):
-                self.add_turn_task(360, angular_speed=5)
+            for _ in range(4):
                 self.add_move_task(side_length)
-                self.add_turn_task(360, angular_speed=7)
+                self.add_turn_task(90)
 
     def stop_robot(self):
         self.cmd_msg.header.stamp = rospy.Time.now()
@@ -69,7 +76,13 @@ class ClosedLoopSquare:
         self.left_ticks = msg.data
 
     def timer_callback(self, event):
-         if not self.is_running:
+        if not self.is_running:
+            return
+
+        # Check for obstacle
+        if self.tof_distance < self.tof_threshold:
+            rospy.logwarn("Obstacle detected within 25cm. Pausing...")
+            self.stop_robot()
             return
 
         if self.break_start is not None:
@@ -109,7 +122,7 @@ class ClosedLoopSquare:
         direction = 1 if distance >= 0 else -1
         self.tasks.append({
             'action': 'move',
-             'ticks': ticks,
+            'ticks': ticks,
             'speed': abs(speed) * direction
         })
 
@@ -129,7 +142,7 @@ class ClosedLoopSquare:
         if moved_ticks >= self.current_task['ticks']:
             return True
         self.cmd_msg.header.stamp = rospy.Time.now()
-         self.cmd_msg.v = self.current_task['speed']
+        self.cmd_msg.v = self.current_task['speed']
         self.cmd_msg.omega = 0.0
         self.pub.publish(self.cmd_msg)
         return False
