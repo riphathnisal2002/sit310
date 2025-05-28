@@ -1,203 +1,138 @@
 #!/usr/bin/env python3
-import rospy
-import numpy as np
-from duckietown_msgs.msg import Twist2DStamped
-from duckietown_msgs.msg import AprilTagDetectionArray
-from sensor_msgs.msg import CompressedImage
-from cv_bridge import CvBridge
-import cv2
 
-class EnhancedLaneFollower:
+import rospy
+from duckietown_msgs.msg import Twist2DStamped
+from duckietown_msgs.msg import FSMState
+from duckietown_msgs.msg import AprilTagDetectionArray
+
+class Autopilot:
     def __init__(self):
-        rospy.init_node('enhanced_lane_follower', anonymous=True)
         
-        # Publishers and Subscribers
-        self.cmd_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
-        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback)
-        rospy.Subscriber('/birdie/camera_node/image/compressed', CompressedImage, self.image_callback)
+        #Initialize ROS node
+        rospy.init_node('autopilot_node', anonymous=True)
+
+        self.robot_state = "LANE_FOLLOWING"
         
-        # CV Bridge for image processing
-        self.bridge = CvBridge()
+        # Stop sign control variables
+        self.stop_sign_detected = False
+        self.stop_sign_processed = False
+        self.last_stop_time = None
+
+        # When shutdown signal is received, we run clean_shutdown function
+        rospy.on_shutdown(self.clean_shutdown)
         
-        # Control parameters
-        self.base_speed = 0.3  # Base forward speed
-        self.max_angular_speed = 2.0  # Maximum turning speed
-        
-        # PID controller parameters for lane following
-        self.kp = 0.8  # Proportional gain
-        self.ki = 0.05  # Integral gain  
-        self.kd = 0.1  # Derivative gain
-        
-        # PID state variables
-        self.integral_error = 0.0
-        self.previous_error = 0.0
-        self.last_time = rospy.Time.now()
-        
-        # Tag detection state
-        self.last_tag_time = rospy.Time(0)
-        self.tag_cooldown = rospy.Duration(5.0)
-        self.is_stopped = False
-        
-        # Lane detection parameters
-        self.image_width = 640
-        self.image_height = 480
-        self.roi_height = 200  # Region of interest height from bottom
-        
-        rospy.on_shutdown(self.stop_robot)
-        
-        # Main control loop
-        self.control_timer = rospy.Timer(rospy.Duration(0.05), self.control_loop)  # 20Hz
-        rospy.spin()
-    
-    def image_callback(self, msg):
-        """Process camera image for lane detection"""
-        try:
-            # Convert compressed image to OpenCV format
-            np_arr = np.frombuffer(msg.data, np.uint8)
-            cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            
-            # Process image for lane detection
-            self.lane_error = self.detect_lanes(cv_image)
-            
-        except Exception as e:
-            rospy.logwarn(f"Image processing error: {e}")
-            self.lane_error = 0.0
-    
-    def detect_lanes(self, image):
-        """Detect lane lines and return steering error"""
-        # Convert to HSV for better color filtering
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        
-        # Define yellow and white color ranges for lane detection
-        # Yellow lane markers
-        yellow_lower = np.array([20, 50, 50])
-        yellow_upper = np.array([30, 255, 255])
-        yellow_mask = cv2.inRange(hsv, yellow_lower, yellow_upper)
-        
-        # White lane markers
-        white_lower = np.array([0, 0, 200])
-        white_upper = np.array([180, 30, 255])
-        white_mask = cv2.inRange(hsv, white_lower, white_upper)
-        
-        # Combine masks
-        lane_mask = cv2.bitwise_or(yellow_mask, white_mask)
-        
-        # Focus on region of interest (bottom portion of image)
-        roi_mask = np.zeros_like(lane_mask)
-        roi_mask[-self.roi_height:, :] = 255
-        lane_mask = cv2.bitwise_and(lane_mask, roi_mask)
-        
-        # Find contours
-        contours, _ = cv2.findContours(lane_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if not contours:
-            return 0.0  # No lanes detected, go straight
-        
-        # Find the largest contour (assumed to be the lane)
-        largest_contour = max(contours, key=cv2.contourArea)
-        
-        # Calculate moments to find centroid
-        M = cv2.moments(largest_contour)
-        if M["m00"] != 0:
-            lane_center_x = int(M["m10"] / M["m00"])
-            image_center_x = self.image_width // 2
-            
-            # Calculate error (positive = turn right, negative = turn left)
-            error = (lane_center_x - image_center_x) / (self.image_width / 2.0)
-            return error
-        
-        return 0.0
-    
-    def pid_controller(self, error):
-        """PID controller for smooth steering"""
-        current_time = rospy.Time.now()
-        dt = (current_time - self.last_time).to_sec()
-        
-        if dt <= 0:
-            return 0.0
-        
-        # Proportional term
-        proportional = self.kp * error
-        
-        # Integral term
-        self.integral_error += error * dt
-        integral = self.ki * self.integral_error
-        
-        # Derivative term
-        derivative = self.kd * (error - self.previous_error) / dt
-        
-        # Calculate output
-        output = proportional + integral + derivative
-        
-        # Update for next iteration
-        self.previous_error = error
-        self.last_time = current_time
-        
-        # Clamp output to maximum angular speed
-        return np.clip(output, -self.max_angular_speed, self.max_angular_speed)
-    
+        ###### Init Pub/Subs. REMEMBER TO REPLACE "akandb" WITH YOUR ROBOT'S NAME #####
+        self.cmd_vel_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        self.state_pub = rospy.Publisher('/birdie/fsm_node/mode', FSMState, queue_size=1)
+        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback, queue_size=1)
+        ################################################################
+
+        rospy.spin() # Spin forever but listen to message callbacks
+
+    # Apriltag Detection Callback
     def tag_callback(self, msg):
-        """Handle AprilTag detections"""
-        now = rospy.Time.now()
-        if len(msg.detections) > 0 and (now - self.last_tag_time > self.tag_cooldown):
-            rospy.loginfo("Tag detected! Initiating stop sequence.")
-            self.last_tag_time = now
-            self.is_stopped = True
+        if self.robot_state != "LANE_FOLLOWING":
+            return
+        
+        self.move_robot(msg.detections)
+ 
+    # Stop Robot before node has shut down. This ensures the robot keep moving with the latest velocity command
+    def clean_shutdown(self):
+        rospy.loginfo("System shutting down. Stopping robot...")
+        self.stop_robot()
+
+    # Sends zero velocity to stop the robot
+    def stop_robot(self):
+        cmd_msg = Twist2DStamped()
+        cmd_msg.header.stamp = rospy.Time.now()
+        cmd_msg.v = 0.0
+        cmd_msg.omega = 0.0
+        self.cmd_vel_pub.publish(cmd_msg)
+
+    def set_state(self, state):
+        self.robot_state = state
+        state_msg = FSMState()
+        state_msg.header.stamp = rospy.Time.now()
+        state_msg.state = self.robot_state
+        self.state_pub.publish(state_msg)
+
+    def move_robot(self, detections):
+
+        #### YOUR CODE GOES HERE ####
+
+        if len(detections) == 0:
+            # If no detections and we were previously processing a stop sign, reset the flag
+            if self.stop_sign_detected and not self.stop_sign_processed:
+                self.reset_stop_sign_state()
+            return
+
+        # Check if any detection is a stop sign (tag ID 31)
+        stop_sign_detection = None
+        for detection in detections:
+            if detection.tag_id == 31:
+                stop_sign_detection = detection
+                break
+        
+        if stop_sign_detection is not None:
+            self.handle_stop_sign(stop_sign_detection)
+        else:
+            # If no stop sign detected, reset stop sign state
+            if self.stop_sign_detected and not self.stop_sign_processed:
+                self.reset_stop_sign_state()
+
+        #############################
+    
+    def handle_stop_sign(self, detection):
+        """Handle stop sign detection and stopping behavior"""
+        
+        # If we've already processed this stop sign recently, ignore it
+        if self.stop_sign_processed:
+            current_time = rospy.Time.now()
+            if self.last_stop_time and (current_time - self.last_stop_time).to_sec() < 5.0:
+                # Ignore stop signs for 5 seconds after processing one
+                return
+            else:
+                # Reset if enough time has passed
+                self.stop_sign_processed = False
+        
+        # Mark that we've detected a stop sign
+        if not self.stop_sign_detected:
+            self.stop_sign_detected = True
+            rospy.loginfo("Stop sign detected! Initiating stop sequence...")
+            
+            # Switch to manual control to override lane following
+            self.set_state("NORMAL_JOYSTICK_CONTROL")
             
             # Stop the robot
             self.stop_robot()
+            rospy.loginfo("Robot stopped for 3 seconds...")
             
-            # Sleep for 3 seconds
+            # Wait for 3 seconds
             rospy.sleep(3.0)
             
-            # Reset PID controller state
-            self.integral_error = 0.0
-            self.previous_error = 0.0
+            # Mark this stop sign as processed
+            self.stop_sign_processed = True
+            self.last_stop_time = rospy.Time.now()
             
-            self.is_stopped = False
-            rospy.loginfo("Stop sequence complete, resuming lane following.")
-    
-    def control_loop(self, event):
-        """Main control loop for lane following"""
-        if self.is_stopped:
-            return
-        
-        # Get lane following command
-        if hasattr(self, 'lane_error'):
-            # Use PID controller for smooth steering
-            angular_velocity = -self.pid_controller(self.lane_error)  # Negative for correct turning direction
+            rospy.loginfo("3 seconds completed. Resuming lane following...")
             
-            # Reduce speed when turning sharply
-            speed_factor = 1.0 - 0.3 * abs(angular_velocity) / self.max_angular_speed
-            linear_velocity = self.base_speed * speed_factor
+            # Return to lane following
+            self.set_state("LANE_FOLLOWING")
             
-        else:
-            # No lane detected yet, go straight slowly
-            linear_velocity = self.base_speed * 0.5
-            angular_velocity = 0.0
-        
-        # Publish command
-        self.publish_cmd(linear_velocity, angular_velocity)
+            # Reset detection flag after a brief delay
+            rospy.Timer(rospy.Duration(1.0), self.reset_stop_sign_callback, oneshot=True)
     
-    def publish_cmd(self, v, omega):
-        """Publish movement command"""
-        cmd = Twist2DStamped()
-        cmd.header.stamp = rospy.Time.now()
-        cmd.v = v
-        cmd.omega = omega
-        self.cmd_pub.publish(cmd)
+    def reset_stop_sign_callback(self, event):
+        """Timer callback to reset stop sign detection state"""
+        self.reset_stop_sign_state()
     
-    def stop_robot(self):
-        """Stop the robot completely"""
-        cmd = Twist2DStamped()
-        cmd.header.stamp = rospy.Time.now()
-        cmd.v = 0.0
-        cmd.omega = 0.0
-        self.cmd_pub.publish(cmd)
+    def reset_stop_sign_state(self):
+        """Reset stop sign detection state"""
+        self.stop_sign_detected = False
+        rospy.loginfo("Stop sign state reset. Ready to detect new stop signs.")
 
 if __name__ == '__main__':
     try:
-        EnhancedLaneFollower()
+        autopilot_instance = Autopilot()
     except rospy.ROSInterruptException:
-        rospy.loginfo("Lane follower node interrupted.")
         pass
