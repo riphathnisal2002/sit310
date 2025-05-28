@@ -1,77 +1,77 @@
 #!/usr/bin/env python3
 
 import rospy
-from duckietown_msgs.msg import Twist2DStamped, BoolStamped
+from duckietown_msgs.msg import Twist2DStamped, FSMState, AprilTagDetectionArray
 from std_msgs.msg import Header
 
-
-class StopSignBehavior:
+class Autopilot:
     def __init__(self):
-        rospy.init_node('stop_sign_behavior_node')
+        rospy.init_node('autopilot_node', anonymous=True)
 
-        self.car_cmd_pub = rospy.Publisher("/birdie/car_cmd", Twist2DStamped, queue_size=1)
-        self.stop_sign_sub = rospy.Subscriber("/birdie/stop_sign_detected", BoolStamped, self.stop_sign_cb)
-        self.lane_follow_sub = rospy.Subscriber("/birdie/lane_controller/car_cmd", Twist2DStamped, self.lane_follow_cb)
+        self.robot_state = "LANE_FOLLOWING"
+        self.stop_in_progress = False  # To avoid retriggering during stop behavior
 
-        # State management
-        self.state = "LANE_FOLLOWING"
-        self.ignore_stop_signs = False
-        self.stopping_timer_started = False
+        self.cmd_vel_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        self.state_pub = rospy.Publisher('/birdie/fsm_node/mode', FSMState, queue_size=1)
+        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback, queue_size=1)
 
-        # Parameters
-        self.ignore_duration = 4  # seconds to ignore stop signs after stopping
-        self.wait_duration = 3    # seconds to stop at stop sign
-
-    def stop_sign_cb(self, msg):
-        if self.ignore_stop_signs:
-            return
-
-        if msg.data and self.state == "LANE_FOLLOWING":
-            rospy.loginfo("Stop Sign Detected!")
-            self.state = "STOPPING"
-            self.stopping_timer_started = False
-
-    def lane_follow_cb(self, msg):
-        if self.state == "LANE_FOLLOWING":
-            self.car_cmd_pub.publish(msg)
-
-        elif self.state == "STOPPING":
-            self.publish_stop()
-            if not self.stopping_timer_started:
-                rospy.loginfo("Stopping for stop sign...")
-                rospy.Timer(rospy.Duration(self.wait_duration), self.resume_after_stop, oneshot=True)
-                self.stopping_timer_started = True
-                self.state = "WAITING"
-
-        elif self.state == "WAITING":
-            self.publish_stop()
-
-        elif self.state == "IGNORING_TAGS":
-            self.car_cmd_pub.publish(msg)
-
-    def publish_stop(self):
-        stop_msg = Twist2DStamped()
-        stop_msg.header = Header()
-        stop_msg.header.stamp = rospy.Time.now()
-        stop_msg.v = 0.0
-        stop_msg.omega = 0.0
-        self.car_cmd_pub.publish(stop_msg)
-
-    def resume_after_stop(self, event):
-        rospy.loginfo("Stop complete. Ignoring stop signs for a short duration.")
-        self.ignore_stop_signs = True
-        self.state = "IGNORING_TAGS"
-        rospy.Timer(rospy.Duration(self.ignore_duration), self.stop_ignoring_tags, oneshot=True)
-
-    def stop_ignoring_tags(self, event):
-        rospy.loginfo("Resuming normal stop sign detection.")
-        self.ignore_stop_signs = False
-        self.state = "LANE_FOLLOWING"
-
-    def run(self):
+        rospy.on_shutdown(self.clean_shutdown)
         rospy.spin()
 
+    def tag_callback(self, msg):
+        if self.stop_in_progress or self.robot_state != "LANE_FOLLOWING":
+            return
+
+        # Check if a Stop Sign is detected (AprilTag ID 1 is typically used for stop signs)
+        for detection in msg.detections:
+            if detection.tag_id == 1:
+                rospy.loginfo("Stop sign detected. Executing stop behavior...")
+                self.stop_in_progress = True
+                self.execute_stop_behavior()
+                return
+
+    def execute_stop_behavior(self):
+        # Step 1: Stop the robot
+        self.set_state("NORMAL_JOYSTICK_CONTROL")
+        self.stop_robot()
+        rospy.sleep(3)  # Wait for 3 seconds
+
+        # Step 2: Move forward in open-loop mode to get past the stop sign
+        rospy.loginfo("Moving forward to clear stop sign from view...")
+        forward_cmd = Twist2DStamped()
+        forward_cmd.header.stamp = rospy.Time.now()
+        forward_cmd.v = 0.15  # Forward speed
+        forward_cmd.omega = 0.0
+        self.cmd_vel_pub.publish(forward_cmd)
+        rospy.sleep(1.0)  # Move forward for 1 second
+
+        # Step 3: Stop and resume lane following
+        rospy.loginfo("Resuming lane following...")
+        self.stop_robot()
+        self.set_state("LANE_FOLLOWING")
+        self.stop_in_progress = False
+
+    def stop_robot(self):
+        cmd_msg = Twist2DStamped()
+        cmd_msg.header.stamp = rospy.Time.now()
+        cmd_msg.v = 0.0
+        cmd_msg.omega = 0.0
+        self.cmd_vel_pub.publish(cmd_msg)
+
+    def set_state(self, state):
+        self.robot_state = state
+        state_msg = FSMState()
+        state_msg.header = Header()
+        state_msg.header.stamp = rospy.Time.now()
+        state_msg.state = self.robot_state
+        self.state_pub.publish(state_msg)
+
+    def clean_shutdown(self):
+        rospy.loginfo("System shutting down. Stopping robot...")
+        self.stop_robot()
 
 if __name__ == '__main__':
-    StopSignBehavior().run()
-
+    try:
+        autopilot_instance = Autopilot()
+    except rospy.ROSInterruptException:
+        pass
