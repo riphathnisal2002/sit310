@@ -1,96 +1,60 @@
-#!/usr/bin/env python3
-
 import rospy
-from duckietown_msgs.msg import Twist2DStamped
-from duckietown_msgs.msg import FSMState
-from duckietown_msgs.msg import AprilTagDetectionArray
+from duckietown_msgs.msg import Twist2DStamped, BoolStamped
+from std_msgs.msg import Header
+from threading import Timer
 
-class Autopilot:
+class StopSignBehavior:
     def __init__(self):
-        # Initialize ROS node
-        rospy.init_node('autopilot_node', anonymous=True)
+        rospy.init_node('stop_sign_behavior_node')
 
-        self.robot_state = "LANE_FOLLOWING"
+        self.car_cmd_pub = rospy.Publisher("/birdie/car_cmd", Twist2DStamped, queue_size=1)
+        self.stop_sign_sub = rospy.Subscriber("/birdie/stop_sign_detected", BoolStamped, self.stop_sign_cb)
+        self.lane_follow_sub = rospy.Subscriber("/birdie/lane_controller/car_cmd", Twist2DStamped, self.lane_follow_cb)
 
-        # Shutdown callback
-        rospy.on_shutdown(self.clean_shutdown)
+        self.state = "LANE_FOLLOWING"
+        self.ignore_stop_signs = False
+        self.ignore_duration = 4  # seconds
+        self.wait_duration = 3    # stop duration
 
-        ###### Init Pub/Subs. REMEMBER TO REPLACE "akandb" WITH YOUR ROBOT'S NAME #####
-        self.cmd_vel_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
-        self.state_pub = rospy.Publisher('/birdie/fsm_node/mode', FSMState, queue_size=1)
-        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback, queue_size=1)
-        ################################################################
+    def stop_sign_cb(self, msg):
+        if self.ignore_stop_signs:
+            return  # Ignore tag callbacks during this window
+        if msg.data and self.state == "LANE_FOLLOWING":
+            rospy.loginfo("Stop Sign Detected!")
+            self.state = "STOPPING"
 
-        rospy.spin()  # Listen for messages indefinitely
+    def lane_follow_cb(self, msg):
+        if self.state == "LANE_FOLLOWING":
+            self.car_cmd_pub.publish(msg)
+        elif self.state == "STOPPING":
+            self.publish_stop()
+            rospy.Timer(rospy.Duration(self.wait_duration), self.resume_after_stop, oneshot=True)
+            self.state = "WAITING"
+        elif self.state == "WAITING":
+            self.publish_stop()
+        elif self.state == "IGNORING_TAGS":
+            self.car_cmd_pub.publish(msg)
 
-    # Apriltag Detection Callback
-    def tag_callback(self, msg):
-        if self.robot_state != "LANE_FOLLOWING":
-            return
+    def publish_stop(self):
+        stop_msg = Twist2DStamped()
+        stop_msg.header = Header()
+        stop_msg.v = 0.0
+        stop_msg.omega = 0.0
+        self.car_cmd_pub.publish(stop_msg)
 
-        self.move_robot(msg.detections)
+    def resume_after_stop(self, event):
+        rospy.loginfo("Stop complete. Resuming lane following and ignoring stop signs for a while.")
+        self.ignore_stop_signs = True
+        self.state = "IGNORING_TAGS"
+        rospy.Timer(rospy.Duration(self.ignore_duration), self.stop_ignoring_tags, oneshot=True)
 
-    def clean_shutdown(self):
-        rospy.loginfo("System shutting down. Stopping robot...")
-        self.stop_robot()
+    def stop_ignoring_tags(self, event):
+        rospy.loginfo("Done ignoring stop signs.")
+        self.ignore_stop_signs = False
+        self.state = "LANE_FOLLOWING"
 
-    def stop_robot(self):
-        cmd_msg = Twist2DStamped()
-        cmd_msg.header.stamp = rospy.Time.now()
-        cmd_msg.v = 0.0
-        cmd_msg.omega = 0.0
-        self.cmd_vel_pub.publish(cmd_msg)
-
-    def set_state(self, state):
-        self.robot_state = state
-        state_msg = FSMState()
-        state_msg.header.stamp = rospy.Time.now()
-        state_msg.state = self.robot_state
-        self.state_pub.publish(state_msg)
-
-    def move_robot(self, detections):
-        if len(detections) == 0:
-            return
-
-        # Switch to joystick control to override lane following
-        self.set_state("NORMAL_JOYSTICK_CONTROL")
-
-        # Create velocity command message
-        cmd_msg = Twist2DStamped()
-        cmd_msg.header.stamp = rospy.Time.now()
-
-        # React to first recognized tag only
-        for detection in detections:
-            tag_id = detection.id[0]
-            rospy.loginfo(f"Detected AprilTag ID: {tag_id}")
-
-            if tag_id == 1:
-                # Move forward
-                cmd_msg.v = 0.3
-                cmd_msg.omega = 0.0
-            elif tag_id == 2:
-                # Turn left
-                cmd_msg.v = 0.0
-                cmd_msg.omega = 1.0
-            elif tag_id == 3:
-                # Turn right
-                cmd_msg.v = 0.0
-                cmd_msg.omega = -1.0
-            else:
-                rospy.loginfo("Unrecognized tag ID. Ignoring.")
-                return
-
-            self.cmd_vel_pub.publish(cmd_msg)
-            rospy.sleep(1.0)  # Move for 1 second
-            self.stop_robot()
-            rospy.sleep(0.5)
-            break  # Only act on one detection at a time
-
-        # Return to lane following mode
-        self.set_state("LANE_FOLLOWING")
+    def run(self):
+        rospy.spin()
 
 if __name__ == '__main__':
-    try:
-        autopilot_instance = Autopilot()
-    except rospy.ROSInterruptException:
-        pass
+    StopSignBehavior().run()
