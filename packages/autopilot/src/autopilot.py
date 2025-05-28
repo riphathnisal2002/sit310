@@ -1,47 +1,47 @@
 #!/usr/bin/env python3
 
 import rospy
-from duckietown_msgs.msg import Twist2DStamped
-from duckietown_msgs.msg import FSMState
-from duckietown_msgs.msg import AprilTagDetectionArray
+from duckietown_msgs.msg import Twist2DStamped, FSMState, AprilTagDetectionArray
 
 class Autopilot:
     def __init__(self):
-        
-        #Initialize ROS node
+        # Initialize ROS node
         rospy.init_node('autopilot_node', anonymous=True)
 
         self.robot_state = "LANE_FOLLOWING"
-        
-        # Stop sign control variables
-        self.stop_sign_detected = False
-        self.stop_sign_processed = False
-        self.last_stop_time = None
 
-        # When shutdown signal is received, we run clean_shutdown function
+        # Flag to ignore tags while waiting/moving past a Stop sign
+        self.ignore_tags = False
+
+        # Time to stop at each stop sign
+        self.stop_duration = rospy.get_param("~stop_duration", 3.0)
+
+        # Time to ignore tags after stopping
+        self.ignore_duration = rospy.get_param("~ignore_duration", 2.0)
+
+        # When shutdown signal is received, run clean_shutdown function
         rospy.on_shutdown(self.clean_shutdown)
-        
-        ###### Init Pub/Subs. REMEMBER TO REPLACE "akandb" WITH YOUR ROBOT'S NAME #####
+
+        # Init publishers and subscribers (replace 'jeff' with your robot name if needed)
         self.cmd_vel_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
         self.state_pub = rospy.Publisher('/birdie/fsm_node/mode', FSMState, queue_size=1)
-        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback, queue_size=1)
-        ################################################################
+        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray,
+                         self.tag_callback, queue_size=1)
 
-        rospy.spin() # Spin forever but listen to message callbacks
+        rospy.spin()  # Keep node running and listening for callbacks
 
-    # Apriltag Detection Callback
+    # Callback for AprilTag detection
     def tag_callback(self, msg):
-        if self.robot_state != "LANE_FOLLOWING":
+        if self.robot_state != "LANE_FOLLOWING" or self.ignore_tags:
             return
-        
         self.move_robot(msg.detections)
- 
-    # Stop Robot before node has shut down. This ensures the robot keep moving with the latest velocity command
+
+    # Clean shutdown procedure
     def clean_shutdown(self):
         rospy.loginfo("System shutting down. Stopping robot...")
         self.stop_robot()
 
-    # Sends zero velocity to stop the robot
+    # Stop robot by publishing zero velocity
     def stop_robot(self):
         cmd_msg = Twist2DStamped()
         cmd_msg.header.stamp = rospy.Time.now()
@@ -49,6 +49,7 @@ class Autopilot:
         cmd_msg.omega = 0.0
         self.cmd_vel_pub.publish(cmd_msg)
 
+    # Change the robot FSM state
     def set_state(self, state):
         self.robot_state = state
         state_msg = FSMState()
@@ -56,80 +57,39 @@ class Autopilot:
         state_msg.state = self.robot_state
         self.state_pub.publish(state_msg)
 
+    # Logic for handling detected AprilTags
     def move_robot(self, detections):
-
-        #### YOUR CODE GOES HERE ####
-
-        if len(detections) == 0:
-            # If no detections and we were previously processing a stop sign, reset the flag
-            if self.stop_sign_detected and not self.stop_sign_processed:
-                self.reset_stop_sign_state()
+        if not detections:
             return
 
-        # Check if any detection is a stop sign (tag ID 31)
-        stop_sign_detection = None
-        for detection in detections:
-            if detection.tag_id == 31:
-                stop_sign_detection = detection
-                break
-        
-        if stop_sign_detection is not None:
-            self.handle_stop_sign(stop_sign_detection)
-        else:
-            # If no stop sign detected, reset stop sign state
-            if self.stop_sign_detected and not self.stop_sign_processed:
-                self.reset_stop_sign_state()
+        # Filter for stop sign tags with tag_id = 31
+        stop_sign_detections = [d for d in detections if d.tag_id == 31]
 
-        #############################
-    
-    def handle_stop_sign(self, detection):
-        """Handle stop sign detection and stopping behavior"""
-        
-        # If we've already processed this stop sign recently, ignore it
-        if self.stop_sign_processed:
-            current_time = rospy.Time.now()
-            if self.last_stop_time and (current_time - self.last_stop_time).to_sec() < 5.0:
-                # Ignore stop signs for 5 seconds after processing one
-                return
-            else:
-                # Reset if enough time has passed
-                self.stop_sign_processed = False
-        
-        # Mark that we've detected a stop sign
-        if not self.stop_sign_detected:
-            self.stop_sign_detected = True
-            rospy.loginfo("Stop sign detected! Initiating stop sequence...")
-            
-            # Switch to manual control to override lane following
-            self.set_state("NORMAL_JOYSTICK_CONTROL")
-            
-            # Stop the robot
-            self.stop_robot()
-            rospy.loginfo("Robot stopped for 3 seconds...")
-            
-            # Wait for 3 seconds
-            rospy.sleep(3.0)
-            
-            # Mark this stop sign as processed
-            self.stop_sign_processed = True
-            self.last_stop_time = rospy.Time.now()
-            
-            rospy.loginfo("3 seconds completed. Resuming lane following...")
-            
-            # Return to lane following
-            self.set_state("LANE_FOLLOWING")
-            
-            # Reset detection flag after a brief delay
-            rospy.Timer(rospy.Duration(1.0), self.reset_stop_sign_callback, oneshot=True)
-    
-    def reset_stop_sign_callback(self, event):
-        """Timer callback to reset stop sign detection state"""
-        self.reset_stop_sign_state()
-    
-    def reset_stop_sign_state(self):
-        """Reset stop sign detection state"""
-        self.stop_sign_detected = False
-        rospy.loginfo("Stop sign state reset. Ready to detect new stop signs.")
+        if not stop_sign_detections:
+            return
+
+        rospy.loginfo("Stop sign (tag_id=31) detected → stopping for {:.1f}s".format(self.stop_duration))
+
+        # Stop the robot
+        self.set_state("NORMAL_JOYSTICK_CONTROL")
+        self.stop_robot()
+
+        # Pause for stop duration
+        rospy.sleep(self.stop_duration)
+
+        # Ignore additional stop tags for a short time
+        self.ignore_tags = True
+        rospy.Timer(rospy.Duration(self.ignore_duration), self.reset_ignore, oneshot=True)
+
+        # Resume lane following
+        self.set_state("LANE_FOLLOWING")
+        rospy.loginfo("Resuming lane following")
+
+    # Re-enable tag detection
+    def reset_ignore(self, event):
+        self.ignore_tags = False
+        rospy.loginfo("AprilTag detections re-enabled")
+
 
 if __name__ == '__main__':
     try:
