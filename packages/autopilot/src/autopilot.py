@@ -86,18 +86,18 @@ class Autopilot:
         self.overtake_in_progress = True
         self.set_state("NORMAL_JOYSTICK_CONTROL")
 
-        # Simple open-loop overtake behavior
-        self.rotate_in_place(omega=1.5, duration=2.5)  # Turn left
-        self.move_forward(duration=2.0)
-        self.rotate_in_place(omega=-1.5, duration=2.5)  # Turn right to return
-        self.move_forward(duration=2.0)
+        # Improved open-loop overtake behavior
+        self.rotate_in_place(omega=2.0, duration=1.5)  # Larger left turn
+        self.move_forward(duration=2.5)                # Go around the obstacle
+        self.rotate_in_place(omega=-2.0, duration=1.5) # Return to lane
+        self.move_forward(duration=2.0)                # Straighten out
 
         rospy.loginfo("Overtake complete. Resuming lane following.")
         self.set_state("LANE_FOLLOWING")
         self.overtake_in_progress = False
         self.waiting_for_clear = False
 
-    def rotate_in_place(self, omega=1.5, duration=1.0):
+    def rotate_in_place(self, omega=2.0, duration=1.5):
         cmd_msg = Twist2DStamped()
         cmd_msg.header.stamp = rospy.Time.now()
         cmd_msg.v = 0.0
@@ -120,3 +120,4 @@ if __name__ == '__main__':
         autopilot_instance = Autopilot()
     except rospy.ROSInterruptException:
         pass
+
