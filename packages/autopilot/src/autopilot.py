@@ -87,9 +87,9 @@ class Autopilot:
         self.set_state("NORMAL_JOYSTICK_CONTROL")
 
         # Simple open-loop overtake behavior
-        self.rotate_in_place(omega=1.5, duration=1.0)  # Turn left
+        self.rotate_in_place(omega=1.5, duration=2.5)  # Turn left
         self.move_forward(duration=2.0)
-        self.rotate_in_place(omega=-1.5, duration=1.0)  # Turn right to return
+        self.rotate_in_place(omega=-1.5, duration=2.5)  # Turn right to return
         self.move_forward(duration=2.0)
 
         rospy.loginfo("Overtake complete. Resuming lane following.")
