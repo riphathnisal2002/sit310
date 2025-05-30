@@ -96,7 +96,7 @@ class Autopilot:
         self.rotate_in_place(omega=2.0, duration=1.5)  # Larger left turn
         self.move_forward(duration=2.5)                # Go around the obstacle
         self.rotate_in_place(omega=-2.0, duration=1.5) # Return to lane
-        self.move_forward(duration=2.0)                # Straighten out
+        self.move_forward(duration=1.5)                # Straighten out
 
         rospy.loginfo("Overtake complete. Resuming lane following.")
         self.set_state("LANE_FOLLOWING")
