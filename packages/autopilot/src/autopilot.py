@@ -24,13 +24,18 @@ class Autopilot:
         self.state_pub = rospy.Publisher('/birdie/fsm_node/mode', FSMState, queue_size=1)
         rospy.Subscriber('/birdie/front_center_tof_driver_node/range', Range, self.tof_callback)
 
+        # Immediately set FSM to lane following at startup
+        rospy.sleep(0.5)  # Wait for publisher to register (optional safety)
+        self.set_state("LANE_FOLLOWING")
+
         # Run main loop
         self.main_timer = rospy.Timer(rospy.Duration(0.1), self.main_loop)  # 10Hz loop
 
         rospy.spin()
 
     def clean_shutdown(self):
-        rospy.loginfo("System shutting down. Stopping robot...")
+        rospy.loginfo("System shutting down...")
+        self.set_state("NORMAL_JOYSTICK_CONTROL")  # Ensure safe manual fallback
         self.stop_robot()
 
     def tof_callback(self, msg):
@@ -49,6 +54,7 @@ class Autopilot:
         state_msg.header.stamp = rospy.Time.now()
         state_msg.state = self.robot_state
         self.state_pub.publish(state_msg)
+        rospy.loginfo(f"FSM state set to: {state}")
 
     def main_loop(self, event):
         if self.overtake_in_progress:
